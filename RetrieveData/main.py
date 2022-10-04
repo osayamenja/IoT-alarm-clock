@@ -43,14 +43,10 @@ def dataTime():
             print("invalid format")
         exit()
     if formatting == "days/weeks":
-        pattern = "^[0-9] (days|weeks|day|week}"
-        dw = input("how many days/weeks ago?")
-        if re.match(pattern, dw):
-            print("getting data")
-            #insert getting data code here
-        else:
-            print("invalid format")
-        exit()
+        dw = input("do you want 'days' or 'weeks'? ")
+        n = input("how many " + dw + " ago? ")
+        print("retrieving data for " + n + " " + dw + " ago")
+        #insert getting data code here
     else:
         print("invalid input")
     return
