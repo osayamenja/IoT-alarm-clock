@@ -2,9 +2,24 @@ import json
 import time
 import paho.mqtt.client as mqtt
 import re
+import os
+import mysql.connector
 
 from time import strftime
 from pygame import mixer
+from dotenv import load_dotenv
+from mysql.connector import errorcode
+
+load_dotenv()
+db_config = {
+    "user": os.getenv('USER'),
+    "password": os.getenv('PASSWORD'),
+    "host": os.getenv('HOST'),
+    "port": os.getenv('PORT'),
+    "ssl_ca": os.getenv('SSL_CA'),
+    "database": os.getenv('DATABASE'),
+    "ssl_disabled": False
+}
 
 is_alarm_on = False
 alarm_h = 00
@@ -69,7 +84,25 @@ def check_alarm():
         time.sleep(10)
 
 
+def init_database():
+    try:
+        conn = mysql.connector.connect(**db_config)
+        print("Connection established Successfully!")
+    except mysql.connector.Error as err:
+        if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+            print("Something is wrong with the user name or password")
+        elif err.errno == errorcode.ER_BAD_DB_ERROR:
+            print("Database does not exist")
+        else:
+            print(err)
+    else:
+        return conn.cursor()
+
+
 if __name__ == "__main__":
+    # establish db connection
+    db_cursor = init_database()
+
     broker_address = "broker.emqx.io"
     broker_port_number = 1883
     broker_keep_alive_time = 60
