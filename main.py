@@ -8,7 +8,7 @@ from pygame import mixer
 
 is_alarm_on = False
 alarm_h = 00
-alarm_m = 40
+alarm_m = 52
 
 set_alarm_topic = 'raspberry/alarmclock/set_alarm'
 retrieve_data_topic = 'raspberry/alarmclock/retrieve_data'
@@ -64,6 +64,7 @@ def check_alarm():
             # TODO face processing
             is_alarm_on = False
             mixer.pause()
+            time.sleep(60)
 
         time.sleep(10)
 
