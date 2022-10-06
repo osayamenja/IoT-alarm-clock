@@ -31,8 +31,8 @@ input_topics = [set_alarm_topic, retrieve_data_topic]
 
 output_topic = 'raspberry/alarmclock/status'
 mixer.init()
-alarm_sound_file_path = "D:\\Downloads\\alarm-clock-01.wav"
-sound = mixer.Sound(alarm_sound_file_path)
+#alarm_sound_file_path = "D:\\Downloads\\alarm-clock-01.wav"
+#sound = mixer.Sound(alarm_sound_file_path)
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
@@ -73,7 +73,7 @@ def check_alarm():
         if (alarm_h == current_h) and (alarm_m == current_m):
             global is_alarm_on
             is_alarm_on = True
-            sound.play()
+            #sound.play()
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
             # TODO face processing
