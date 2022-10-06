@@ -1,0 +1,8 @@
+#Exclude IDE metadata
+**/.idea
+
+# Exclude env variable files
+.env
+
+#Exclude SSL cert
+db_ssl_cert
