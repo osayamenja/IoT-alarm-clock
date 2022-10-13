@@ -32,7 +32,7 @@ input_topics = [set_alarm_topic, retrieve_data_topic]
 output_topic = 'raspberry/alarmclock/status'
 mixer.init()
 alarm_sound_file_path = os.getenv('ALARM_SOUND_FILE_PATH')
-sound = mixer.Sound(alarm_sound_file_path)
+#sound = mixer.Sound(alarm_sound_file_path)
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
@@ -78,7 +78,7 @@ def check_alarm():
             time.sleep(5)
             # TODO face processing
             is_alarm_on = False
-            mixer.pause()
+            #mixer.pause()
             time.sleep(60)
 
         time.sleep(10)
@@ -96,12 +96,24 @@ def init_database():
         else:
             print(err)
     else:
-        return conn.cursor()
+        db_cursor = conn.cursor()
+        db_cursor.execute("SELECT * FROM inventory;")
+        rows = db_cursor.fetchall()
+        print("Read", db_cursor.rowcount, "row(s) of data.")
+        for row in rows:
+            print("Data row = (%s, %s, %s)" % (str(row[0]), str(row[1]), str(row[2])))
+
+            # Cleanup
+        conn.commit()
+        db_cursor.close()
+        conn.close()
+        print("Done.")
 
 
 if __name__ == "__main__":
     # establish db connection
-    db_cursor = init_database()
+    init_database()
+    # Read data
 
     broker_address = "broker.emqx.io"
     broker_port_number = 1883
