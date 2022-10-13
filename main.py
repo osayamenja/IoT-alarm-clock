@@ -7,12 +7,12 @@ import mysql.connector
 
 from time import strftime
 from pygame import mixer
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from mysql.connector import errorcode
 
-load_dotenv()
+load_dotenv(find_dotenv())
 db_config = {
-    "user": os.getenv('USER'),
+    "user": os.getenv('DB_USER'),
     "password": os.getenv('PASSWORD'),
     "host": os.getenv('HOST'),
     "port": os.getenv('PORT'),
@@ -22,8 +22,8 @@ db_config = {
 }
 
 is_alarm_on = False
-alarm_h = 00
-alarm_m = 52
+alarm_h = 15
+alarm_m = 45
 
 set_alarm_topic = 'raspberry/alarmclock/set_alarm'
 retrieve_data_topic = 'raspberry/alarmclock/retrieve_data'
@@ -31,8 +31,8 @@ input_topics = [set_alarm_topic, retrieve_data_topic]
 
 output_topic = 'raspberry/alarmclock/status'
 mixer.init()
-#alarm_sound_file_path = "D:\\Downloads\\alarm-clock-01.wav"
-#sound = mixer.Sound(alarm_sound_file_path)
+alarm_sound_file_path = os.getenv('ALARM_SOUND_FILE_PATH')
+sound = mixer.Sound(alarm_sound_file_path)
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
