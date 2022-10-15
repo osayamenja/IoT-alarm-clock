@@ -8,7 +8,6 @@ import cv2
 import pyttsx3
 import face_recognition
 import pickle
-import shutil
 
 from picamera import PiCamera
 from imutils import paths
@@ -69,6 +68,7 @@ def is_user_registered(input_username):
     cursor.close()
     return result > 0
 
+
 def convert_to_binary_data(filename):
     with open(filename, 'rb') as file:
         b = file.read()
@@ -89,6 +89,7 @@ def write_encodings_file_from_db_to_disk(input_username):
     db_conn.commit()
     cursor.close()
 
+
 def upload_encodings_to_db(input_username):
     cursor = db_conn.cursor()
     insert_query = "INSERT INTO {} (username, encodings) VALUES (%s, %s)".format(facial_data_table_name)
@@ -96,44 +97,45 @@ def upload_encodings_to_db(input_username):
     cursor.execute(insert_query, (input_username, binary_encoding))
     db_conn.commit()
     cursor.close()
-    
-    
+
+
 def persist_images_to_disk():
     cam = PiCamera()
     cam.resolution = (512, 304)
     cam.framerate = 10
-    rawCapture = PiRGBArray(cam, size=(512, 304))
+    raw_capture = PiRGBArray(cam, size=(512, 304))
     img_counter = 0
-    
+
     engine = pyttsx3.init()
     engine.setProperty('rate', 150)
     engine.say("Please look at the camera and stay still for five seconds.")
     engine.say("Photo capture will begin in five seconds")
     engine.runAndWait()
     time.sleep(4)
-    
-    for frame in cam.capture_continuous(rawCapture, format="bgr", use_video_port=True):
+
+    for frame in cam.capture_continuous(raw_capture, format="bgr", use_video_port=True):
         image = frame.array
-        rawCapture.truncate(0)
-        
+        raw_capture.truncate(0)
+
         img_name = image_data_file_path + "image_{}".format(img_counter)
         cv2.imwrite(img_name, image)
         img_counter += 1
         time.sleep(0.25)
-        
+
         if img_counter == 12:
             break
-    
+
     engine.say("Photo capture is complete!")
     engine.runAndWait()
-    cv2.destroyAllWindows() 
+    cv2.destroyAllWindows()
+
 
 def train_model():
-    imagePaths = list(paths.list_images(image_data_file_path))
-    knownEncodings = []
-    
-    for (i, imagePath) in enumerate(imagePaths):
-        print("[INFO] processing image {}/{}".format(i + 1, len(imagePaths)))
+    image_paths = list(paths.list_images(image_data_file_path))
+    known_encodings = []
+
+    for (i, imagePath) in enumerate(image_paths):
+        print("[INFO] processing image {}/{}".format(i + 1, len(image_paths)))
         # load the input image and convert it from RGB (OpenCV ordering)
         # to dlib ordering (RGB)
         image = cv2.imread(imagePath)
@@ -145,19 +147,20 @@ def train_model():
 
         # compute the facial embedding for the face
         encodings = face_recognition.face_encodings(rgb, boxes)
-        
+
         for encoding in encodings:
-            knownEncodings.append(encoding)
-    
+            known_encodings.append(encoding)
+
     print("[INFO] persisting encodings locally...")
-    data = {"encodings": knownEncodings}
+    data = {"encodings": known_encodings}
     write_file(pickle.dumps(data), encoding_data_file_path)
-    
+
+
 def register_user(input_username):
-       persist_images_to_disk()
-       train_model()
-       upload_encodings_to_db(input_username)
-       
+    persist_images_to_disk()
+    train_model()
+    upload_encodings_to_db(input_username)
+
 
 def on_connect(mqttclient, userdata, flags, rc):
     for topic in input_topics:
