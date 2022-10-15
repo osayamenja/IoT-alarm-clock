@@ -4,7 +4,15 @@ import paho.mqtt.client as mqtt
 import re
 import os
 import mysql.connector
+import cv2
+import pyttsx3
+import face_recognition
+import pickle
+import shutil
 
+from picamera import PiCamera
+from imutils import paths
+from picamera.array import PiRGBArray
 from time import strftime
 from pygame import mixer
 from dotenv import load_dotenv, find_dotenv
@@ -36,8 +44,11 @@ output_topic = 'raspberry/alarmclock/status'
 mixer.init()
 alarm_sound_file_path = os.getenv('ALARM_SOUND_FILE_PATH')
 sound = mixer.Sound(alarm_sound_file_path)
-facial_encoding_file_path = os.getenv('ENCODING_FILE_PATH')
+encoding_data_file_path = os.getenv('ENCODING_DATA_FILE_PATH')
+image_data_file_path = os.getenv('IMAGE_DATA_FILE_PATH')
 max_wake_up_seconds = 30
+
+facial_data_table_name = os.getenv('FACIAL_DATA_TABLE_NAME')
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
@@ -52,8 +63,16 @@ def extract_hour_and_minute(input_time):
 
 def is_user_registered(input_username):
     cursor = db_conn.cursor()
-    cursor.execute("SELECT username FROM facial_data WHERE username = %s", (input_username,))
-    return len(cursor.fetchall()) > 0
+    cursor.execute("SELECT username FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
+    result = len(cursor.fetchall())
+    db_conn.commit()
+    cursor.close()
+    return result > 0
+
+def convert_to_binary_data(filename):
+    with open(filename, 'rb') as file:
+        b = file.read()
+    return b
 
 
 def write_file(data, filename):
@@ -64,14 +83,81 @@ def write_file(data, filename):
 
 def write_encodings_file_from_db_to_disk(input_username):
     cursor = db_conn.cursor()
-    cursor.execute("SELECT encodings FROM facial_data WHERE username = %s", (input_username,))
+    cursor.execute("SELECT encodings FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
     record = cursor.fetchone()  # There should only be one encoding per user.
-    write_file(record[0][1], facial_encoding_file_path)
+    write_file(record[0][1], encoding_data_file_path)
+    db_conn.commit()
+    cursor.close()
 
+def upload_encodings_to_db(input_username):
+    cursor = db_conn.cursor()
+    insert_query = "INSERT INTO {} (username, encodings) VALUES (%s, %s)".format(facial_data_table_name)
+    binary_encoding = convert_to_binary_data(encoding_data_file_path)
+    cursor.execute(insert_query, (input_username, binary_encoding))
+    db_conn.commit()
+    cursor.close()
+    
+    
+def persist_images_to_disk():
+    cam = PiCamera()
+    cam.resolution = (512, 304)
+    cam.framerate = 10
+    rawCapture = PiRGBArray(cam, size=(512, 304))
+    img_counter = 0
+    
+    engine = pyttsx3.init()
+    engine.setProperty('rate', 150)
+    engine.say("Please look at the camera and stay still for five seconds.")
+    engine.say("Photo capture will begin in five seconds")
+    engine.runAndWait()
+    time.sleep(4)
+    
+    for frame in cam.capture_continuous(rawCapture, format="bgr", use_video_port=True):
+        image = frame.array
+        rawCapture.truncate(0)
+        
+        img_name = image_data_file_path + "image_{}".format(img_counter)
+        cv2.imwrite(img_name, image)
+        img_counter += 1
+        time.sleep(0.25)
+        
+        if img_counter == 12:
+            break
+    
+    engine.say("Photo capture is complete!")
+    engine.runAndWait()
+    cv2.destroyAllWindows() 
 
+def train_model():
+    imagePaths = list(paths.list_images(image_data_file_path))
+    knownEncodings = []
+    
+    for (i, imagePath) in enumerate(imagePaths):
+        print("[INFO] processing image {}/{}".format(i + 1, len(imagePaths)))
+        # load the input image and convert it from RGB (OpenCV ordering)
+        # to dlib ordering (RGB)
+        image = cv2.imread(imagePath)
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # detect the (x, y)-coordinates of the bounding boxes
+        # corresponding to each face in the input image
+        boxes = face_recognition.face_locations(rgb, model="hog")
+
+        # compute the facial embedding for the face
+        encodings = face_recognition.face_encodings(rgb, boxes)
+        
+        for encoding in encodings:
+            knownEncodings.append(encoding)
+    
+    print("[INFO] persisting encodings locally...")
+    data = {"encodings": knownEncodings}
+    write_file(pickle.dumps(data), encoding_data_file_path)
+    
 def register_user(input_username):
-    print("working...")
-
+       persist_images_to_disk()
+       train_model()
+       upload_encodings_to_db(input_username)
+       
 
 def on_connect(mqttclient, userdata, flags, rc):
     for topic in input_topics:
@@ -112,7 +198,7 @@ def set_alarm(mqttclient, user_input):
 
 
 def on_message(mqttclient, userdata, msg):
-    while is_alarm_on:  # Will not process request when alarm is ringing.
+    while is_alarm_on:  # Will delay processing request when alarm is ringing.
         time.sleep(0.5)
     p = str(msg.payload.decode("utf-8"))
     if msg.topic == set_alarm_topic:
@@ -120,7 +206,7 @@ def on_message(mqttclient, userdata, msg):
 
     elif msg.topic == register_user_topic:
         parsed_input = p.split(',')
-        # register_user()
+        register_user(parsed_input[0])
         configure_alarm(mqttclient, parsed_input)
 
     elif msg.topic == retrieve_data_topic:
