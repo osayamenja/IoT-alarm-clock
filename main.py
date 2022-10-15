@@ -21,18 +21,23 @@ db_config = {
     "ssl_disabled": False
 }
 
+db_conn = None
 is_alarm_on = False
-alarm_h = 15
-alarm_m = 45
+alarm_h = None
+alarm_m = None
+wake_up_time = None
 
 set_alarm_topic = 'raspberry/alarmclock/set_alarm'
 retrieve_data_topic = 'raspberry/alarmclock/retrieve_data'
-input_topics = [set_alarm_topic, retrieve_data_topic]
+register_user_topic = 'raspberry/alarmclock/register_user'
+input_topics = [set_alarm_topic, retrieve_data_topic, register_user_topic]
 
 output_topic = 'raspberry/alarmclock/status'
 mixer.init()
 alarm_sound_file_path = os.getenv('ALARM_SOUND_FILE_PATH')
 sound = mixer.Sound(alarm_sound_file_path)
+facial_encoding_file_path = os.getenv('ENCODING_FILE_PATH')
+max_wake_up_seconds = 30
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
@@ -40,9 +45,70 @@ time_query_output = {"10/4/2022 12:30": "80 secs", "10/4/2022 11:30": "50 secs"}
 t_and_h_query_output = {"10/4/2022 12:30": {"Temp": "30 *F", "Humidity": "50%"}}
 
 
+def extract_hour_and_minute(input_time):
+    return 12, 45, True
+    # TODO for team member working on set_alarm
+
+
+def is_user_registered(input_username):
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT username FROM facial_data WHERE username = %s", (input_username,))
+    return len(cursor.fetchall()) > 0
+
+
+def write_file(data, filename):
+    # Convert binary data to proper format and write it on Hard Disk
+    with open(filename, 'wb') as file:
+        file.write(data)
+
+
+def write_encodings_file_from_db_to_disk(input_username):
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT encodings FROM facial_data WHERE username = %s", (input_username,))
+    record = cursor.fetchone()  # There should only be one encoding per user.
+    write_file(record[0][1], facial_encoding_file_path)
+
+
+def register_user(input_username):
+    print("working...")
+
+
 def on_connect(mqttclient, userdata, flags, rc):
     for topic in input_topics:
         mqttclient.subscribe(topic)
+
+
+def configure_alarm(mqttclient, parsed_input):
+    input_time = parsed_input[1].strip()
+    global alarm_m
+    global alarm_h
+    global wake_up_time
+    alarm_h, alarm_m, is_time_valid = extract_hour_and_minute(input_time)
+    wake_up_time = parsed_input[2].strip()
+
+    if is_time_valid and wake_up_time.isnumeric() and wake_up_time <= max_wake_up_seconds:
+        mqttclient.publish(output_topic, payload="Alarm set!", qos=0, retain=False)
+
+    elif not is_time_valid:
+        mqttclient.publish(output_topic, payload="Invalid input, please reenter request", qos=0, retain=False)
+
+    else:
+        response = f"Invalid wakeup time, range is 0 to {max_wake_up_seconds}"
+        mqttclient.publish(output_topic, payload=response, qos=0, retain=False)
+
+
+def set_alarm(mqttclient, user_input):
+    parsed_input = user_input.split(',')
+    username = parsed_input[0]
+    if is_user_registered(username):
+        mqttclient.publish(output_topic, payload="Username Verified!", qos=0, retain=False)
+        mqttclient.publish(output_topic, payload="Setting Alarm...", qos=0, retain=False)
+        write_encodings_file_from_db_to_disk(username)
+        configure_alarm(mqttclient, parsed_input)
+    else:
+        response = "Username not registered\n" \
+                   "Register Username?"
+        mqttclient.publish(output_topic, payload=response, qos=0, retain=False)
 
 
 def on_message(mqttclient, userdata, msg):
@@ -50,11 +116,15 @@ def on_message(mqttclient, userdata, msg):
         time.sleep(0.5)
     p = str(msg.payload.decode("utf-8"))
     if msg.topic == set_alarm_topic:
-        # TODO implement set alarm functionality
-        mqttclient.publish(output_topic, payload="Alarm Set!", qos=0, retain=False)
+        set_alarm(mqttclient, p)
+
+    elif msg.topic == register_user_topic:
+        parsed_input = p.split(',')
+        # register_user()
+        configure_alarm(mqttclient, parsed_input)
 
     elif msg.topic == retrieve_data_topic:
-        # TODO integrate retrieve data functionality
+        # TODO retrieve_data
         retrieved_data = "Invalid Query"
         if re.match('^.*wakeupTime.*', p):
             retrieved_data = json.dumps(time_query_output, indent=2)
@@ -96,12 +166,12 @@ def init_database():
         else:
             print(err)
     else:
-        return conn.cursor()
+        return conn
 
 
 if __name__ == "__main__":
     # establish db connection
-    db_cursor = init_database()
+    db_conn = init_database()
 
     broker_address = "broker.emqx.io"
     broker_port_number = 1883
