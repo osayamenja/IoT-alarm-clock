@@ -152,6 +152,7 @@ def persist_images_to_disk():
     cv2.destroyAllWindows()
 
 
+# Source: https://core-electronics.com.au/guides/face-identify-raspberry-pi/#What
 def train_model():
     image_paths = list(paths.list_images(image_data_file_path))
     known_encodings = []
@@ -178,6 +179,7 @@ def train_model():
     write_file(pickle.dumps(data), encoding_data_file_path)
 
 
+# Source: https://core-electronics.com.au/guides/face-identify-raspberry-pi/#What
 def perform_facial_recognition(user_wake_up_time, alarm_timeout):
     print("[INFO] loading encodings + face detector...")
     data = pickle.loads(open(encoding_data_file_path, "rb").read())
