@@ -8,9 +8,12 @@ import cv2
 import pyttsx3
 import face_recognition
 import pickle
+import imutils
+import datetime
 
 from picamera import PiCamera
 from imutils import paths
+from imutils.video import VideoStream
 from picamera.array import PiRGBArray
 from time import strftime
 from pygame import mixer
@@ -32,7 +35,9 @@ db_conn = None
 is_alarm_on = False
 alarm_h = None
 alarm_m = None
-wake_up_time = None
+user_name = None
+wake_up_duration = None
+awaiting_registration = False
 
 set_alarm_topic = 'raspberry/alarmclock/set_alarm'
 retrieve_data_topic = 'raspberry/alarmclock/retrieve_data'
@@ -48,6 +53,7 @@ image_data_file_path = os.getenv('IMAGE_DATA_FILE_PATH')
 max_wake_up_seconds = 30
 
 facial_data_table_name = os.getenv('FACIAL_DATA_TABLE_NAME')
+wake_up_duration_table_name = os.getenv('W_T_TABLE_NAME')
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
@@ -58,6 +64,13 @@ t_and_h_query_output = {"10/4/2022 12:30": {"Temp": "30 *F", "Humidity": "50%"}}
 def extract_hour_and_minute(input_time):
     return 12, 45, True
     # TODO for team member working on set_alarm
+
+
+# example: 10/16/2022 12:50 PM
+def get_12_hour_date_time(input_time):
+    d = datetime.datetime.now()
+    formatted_time = datetime.datetime.strptime(input_time, "%H:%M").strftime("%I:%M %p")
+    return d.strftime("%m/%d/%Y") + " " + formatted_time
 
 
 def is_user_registered(input_username):
@@ -86,6 +99,15 @@ def write_encodings_file_from_db_to_disk(input_username):
     cursor.execute("SELECT encodings FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
     record = cursor.fetchone()  # There should only be one encoding per user.
     write_file(record[0][1], encoding_data_file_path)
+    db_conn.commit()
+    cursor.close()
+
+
+def insert_wake_up_time(input_username, wakeup_duration, completed_face_detection, input_time):
+    cursor = db_conn.cursor()
+    q = "INSERT INTO {} (username, alarm_date, wake_up_duration, completed_face_recognition) VALUES (%s, %s, %s, %s)"
+    q = q.format(wake_up_duration_table_name)
+    cursor.execute(q, (input_username, get_12_hour_date_time(input_time), wakeup_duration, completed_face_detection))
     db_conn.commit()
     cursor.close()
 
@@ -156,6 +178,57 @@ def train_model():
     write_file(pickle.dumps(data), encoding_data_file_path)
 
 
+def perform_facial_recognition(user_wake_up_time, alarm_timeout):
+    print("[INFO] loading encodings + face detector...")
+    data = pickle.loads(open(encoding_data_file_path, "rb").read())
+    vs = VideoStream(usePiCamera=True).start()
+    time.sleep(2.0)
+    current_time = time.time()
+    wake_up_end = current_time + (60 * user_wake_up_time)
+    alarm_end = current_time + (alarm_timeout * 60)
+    current_time = time.time()
+    found_user = False
+    engine = pyttsx3.init()
+    engine.setProperty('rate', 150)
+    engine.say("Starting facial recognition...")
+    engine.runAndWait()
+
+    while current_time < wake_up_end and current_time < alarm_end:
+        # grab the frame from the threaded video stream and resize it
+        # to 500px (to speedup processing)
+        frame = vs.read()
+        frame = imutils.resize(frame, width=500)
+        # Detect the face boxes
+        boxes = face_recognition.face_locations(frame)
+        # compute the facial embeddings for the user's face bounding box
+        encoding = face_recognition.face_encodings(frame, boxes)[0]
+
+        matches = face_recognition.compare_faces(data["encodings"], encoding)
+
+        # update time
+        current_time = time.time()
+        if True in matches:
+            if not found_user:
+                found_user = True
+                engine.say("Found face! Please stay still and keep your eyes open")
+                engine.runAndWait()
+                time.sleep(2)
+
+        else:
+            found_user = False
+            engine.say("User's Face is not detected")
+            engine.say("Please show face to the camera")
+            engine.runAndWait()
+            wake_up_end = current_time + (60 * user_wake_up_time)
+            time.sleep(2)
+
+    vs.stop()
+    if current_time < alarm_end:
+        return True
+    else:
+        return False
+
+
 def register_user(input_username):
     persist_images_to_disk()
     train_model()
@@ -167,15 +240,20 @@ def on_connect(mqttclient, userdata, flags, rc):
         mqttclient.subscribe(topic)
 
 
-def configure_alarm(mqttclient, parsed_input):
+def configure_alarm(mqttclient, parsed_input, input_username):
     input_time = parsed_input[1].strip()
     global alarm_m
     global alarm_h
-    global wake_up_time
-    alarm_h, alarm_m, is_time_valid = extract_hour_and_minute(input_time)
-    wake_up_time = parsed_input[2].strip()
+    global wake_up_duration
+    global user_name
+    m, h, is_time_valid = extract_hour_and_minute(input_time)
+    w = parsed_input[2].strip()
 
-    if is_time_valid and wake_up_time.isnumeric() and wake_up_time <= max_wake_up_seconds:
+    if is_time_valid and w.isnumeric() and w <= max_wake_up_seconds:
+        alarm_h = h
+        alarm_m = m
+        wake_up_duration = w
+        user_name = input_username
         mqttclient.publish(output_topic, payload="Alarm set!", qos=0, retain=False)
 
     elif not is_time_valid:
@@ -193,10 +271,12 @@ def set_alarm(mqttclient, user_input):
         mqttclient.publish(output_topic, payload="Username Verified!", qos=0, retain=False)
         mqttclient.publish(output_topic, payload="Setting Alarm...", qos=0, retain=False)
         write_encodings_file_from_db_to_disk(username)
-        configure_alarm(mqttclient, parsed_input)
+        configure_alarm(mqttclient, parsed_input, username)
     else:
-        response = "Username not registered\n" \
-                   "Register Username?"
+        global awaiting_registration
+        awaiting_registration = True
+        mqttclient.publish(output_topic, payload="Username not registered", qos=0, retain=False)
+        response = "Register at 'register_user' then re-send request"
         mqttclient.publish(output_topic, payload=response, qos=0, retain=False)
 
 
@@ -208,9 +288,13 @@ def on_message(mqttclient, userdata, msg):
         set_alarm(mqttclient, p)
 
     elif msg.topic == register_user_topic:
-        parsed_input = p.split(',')
-        register_user(parsed_input[0])
-        configure_alarm(mqttclient, parsed_input)
+        global awaiting_registration
+        if awaiting_registration:
+            parsed_input = p.split(',')
+            register_user(parsed_input[0])
+            awaiting_registration = False
+        else:
+            mqttclient.publish(output_topic, payload="Wrong input to 'register_user'", qos=0, retain=False)
 
     elif msg.topic == retrieve_data_topic:
         # TODO retrieve_data
@@ -225,19 +309,33 @@ def on_message(mqttclient, userdata, msg):
 
 
 def check_alarm():
+    global is_alarm_on
+    global wake_up_duration
+    global max_wake_up_seconds
     while 1:
         current_h = int(strftime("%H"))
         current_m = int(strftime("%M"))
 
         if (alarm_h == current_h) and (alarm_m == current_m):
-            global is_alarm_on
+
             is_alarm_on = True
             sound.play()
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
-            # TODO face processing
+            complete_face_detection = perform_facial_recognition(wake_up_duration, (max_wake_up_seconds + 20))
+            mixer.stop()
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 150)
+            alarm_report = "Successfully Completed user's facial recognition!"
+
+            if not complete_face_detection:
+                alarm_report = "Did not succeed in recognizing the user's face during allowed alarm time"
+
+            alarm_time = str(alarm_h) + ":" + str(alarm_m)
+            insert_wake_up_time(user_name, wake_up_duration, complete_face_detection, get_12_hour_date_time(alarm_time))
+            engine.say(alarm_report)
+            engine.runAndWait()
             is_alarm_on = False
-            mixer.pause()
             time.sleep(60)
 
         time.sleep(10)
