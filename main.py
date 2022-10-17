@@ -314,6 +314,9 @@ def check_alarm():
     global is_alarm_on
     global wake_up_duration
     global max_wake_up_seconds
+    global alarm_m
+    global alarm_h
+    global user_name
     while 1:
         current_h = int(strftime("%H"))
         current_m = int(strftime("%M"))
@@ -333,10 +336,17 @@ def check_alarm():
             if not complete_face_detection:
                 alarm_report = "Did not succeed in recognizing the user's face during allowed alarm time"
 
-            alarm_time = str(alarm_h) + ":" + str(alarm_m)
-            insert_wake_up_time(user_name, wake_up_duration, complete_face_detection, get_12_hour_date_time(alarm_time))
             engine.say(alarm_report)
             engine.runAndWait()
+            alarm_time = str(alarm_h) + ":" + str(alarm_m)
+            insert_wake_up_time(user_name, wake_up_duration, complete_face_detection, get_12_hour_date_time(alarm_time))
+
+            # flush alarm data
+            alarm_m = None
+            alarm_h = None
+            wake_up_duration = None
+            user_name = None
+
             is_alarm_on = False
             time.sleep(60)
 
