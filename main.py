@@ -5,12 +5,13 @@ import re
 import os
 import mysql.connector
 import cv2
-import pyttsx3
+import vlc
 import face_recognition
 import pickle
 import imutils
 import datetime
 
+from gtts import gTTS
 from picamera import PiCamera
 from imutils import paths
 from imutils.video import VideoStream
@@ -36,9 +37,11 @@ is_alarm_on = False
 alarm_h = None
 alarm_m = None
 user_name = None
-wake_up_duration = None
+wake_up_duration = 15
 awaiting_registration = False
 
+v = vlc.Instance()
+p = v.media_player_new()
 set_alarm_topic = 'raspberry/alarmclock/set_alarm'
 retrieve_data_topic = 'raspberry/alarmclock/retrieve_data'
 register_user_topic = 'raspberry/alarmclock/register_user'
@@ -52,8 +55,10 @@ encoding_data_file_path = os.getenv('ENCODING_DATA_FILE_PATH')
 image_data_file_path = os.getenv('IMAGE_DATA_FILE_PATH')
 max_wake_up_seconds = 30
 
+tts_file_path = os.getenv('TTS_FILE_PATH')
+
 facial_data_table_name = os.getenv('FACIAL_DATA_TABLE_NAME')
-wake_up_duration_table_name = os.getenv('W_T_TABLE_NAME')
+wake_up_duration_table_name = os.getenv('WAKE_DURATION_TABLE_NAME')
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
@@ -62,10 +67,18 @@ t_and_h_query_output = {"10/4/2022 12:30": {"Temp": "30 *F", "Humidity": "50%"}}
 
 
 def extract_hour_and_minute(input_time):
-    return 12, 45, True
+    return 00, 21, True
     # TODO for team member working on set_alarm
 
 
+def speak_text(input_text):
+    tts = gTTS(input_text)
+    tts.save(tts_file_path)
+    p.set_media(v.media_new(tts_file_path))
+    p.play()
+    time.sleep(5)
+    
+    
 # example: 10/16/2022 12:50 PM
 def get_12_hour_date_time(input_time):
     d = datetime.datetime.now()
@@ -97,8 +110,8 @@ def write_file(data, filename):
 def write_encodings_file_from_db_to_disk(input_username):
     cursor = db_conn.cursor()
     cursor.execute("SELECT encodings FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
-    record = cursor.fetchone()  # There should only be one encoding per user.
-    write_file(record[0][1], encoding_data_file_path)
+    record = cursor.fetchall()  # There should only be one encoding per user.
+    write_file(record[0][0], encoding_data_file_path)
     db_conn.commit()
     cursor.close()
 
@@ -127,28 +140,23 @@ def persist_images_to_disk():
     cam.framerate = 10
     raw_capture = PiRGBArray(cam, size=(512, 304))
     img_counter = 0
-
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 150)
-    engine.say("Please look at the camera and stay still for five seconds.")
-    engine.say("Photo capture will begin in five seconds")
-    engine.runAndWait()
-    time.sleep(4)
-
+    
+    speak_text("Please look at the camera and stay still for five seconds. Photo capture will begin in five seconds")
+    time.sleep(5)
+    
     for frame in cam.capture_continuous(raw_capture, format="bgr", use_video_port=True):
         image = frame.array
         raw_capture.truncate(0)
 
-        img_name = image_data_file_path + "image_{}".format(img_counter)
+        img_name = image_data_file_path + "image_{}.jpg".format(img_counter)
         cv2.imwrite(img_name, image)
+        print("{} written!".format(img_name))
         img_counter += 1
-        time.sleep(0.25)
-
+        time.sleep(0.5)
         if img_counter == 12:
             break
-
-    engine.say("Photo capture is complete!")
-    engine.runAndWait()
+        
+    speak_text("Photo capture is complete!")
     cv2.destroyAllWindows()
 
 
@@ -190,10 +198,7 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
     alarm_end = current_time + (alarm_timeout * 60)
     current_time = time.time()
     found_user = False
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 150)
-    engine.say("Starting facial recognition...")
-    engine.runAndWait()
+    speak_text("Starting facial recognition...")
 
     while current_time < wake_up_end and current_time < alarm_end:
         # grab the frame from the threaded video stream and resize it
@@ -203,27 +208,33 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
         # Detect the face boxes
         boxes = face_recognition.face_locations(frame)
         # compute the facial embeddings for the user's face bounding box
-        encoding = face_recognition.face_encodings(frame, boxes)[0]
-
-        matches = face_recognition.compare_faces(data["encodings"], encoding)
-
-        # update time
-        current_time = time.time()
-        if True in matches:
-            if not found_user:
-                found_user = True
-                engine.say("Found face! Please stay still and keep your eyes open")
-                engine.runAndWait()
-                time.sleep(2)
-
-        else:
+        facial_encodings = face_recognition.face_encodings(frame, boxes)
+        
+        if len(facial_encodings) == 0:
             found_user = False
-            engine.say("User's Face is not detected")
-            engine.say("Please show face to the camera")
-            engine.runAndWait()
+            speak_text("User's Face is not detected. Please show your face to the camera")
             wake_up_end = current_time + (60 * user_wake_up_time)
             time.sleep(2)
+        
+        else:
+            encoding = face_recognition.face_encodings(frame, boxes)[0]
 
+            matches = face_recognition.compare_faces(data["encodings"], encoding)
+
+            # update time
+            current_time = time.time()
+            if True in matches:
+                if not found_user:
+                    found_user = True
+                    speak_text("Found face. Please stay still and keep your eyes open")
+                    time.sleep(2)
+
+            else:
+                found_user = False
+                speak_text("User's Face is not detected. Please show your face to the camera")
+                wake_up_end = current_time + (60 * user_wake_up_time)
+                time.sleep(2)
+            
     vs.stop()
     if current_time < alarm_end:
         return True
@@ -248,13 +259,13 @@ def configure_alarm(mqttclient, parsed_input, input_username):
     global alarm_h
     global wake_up_duration
     global user_name
-    m, h, is_time_valid = extract_hour_and_minute(input_time)
+    h, m, is_time_valid = extract_hour_and_minute(input_time)
     w = parsed_input[2].strip()
 
-    if is_time_valid and w.isnumeric() and w <= max_wake_up_seconds:
+    if is_time_valid and w.isnumeric() and int(w) <= max_wake_up_seconds:
         alarm_h = h
         alarm_m = m
-        wake_up_duration = w
+        wake_up_duration = int(w)
         user_name = input_username
         mqttclient.publish(output_topic, payload="Alarm set!", qos=0, retain=False)
 
@@ -268,7 +279,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
 
 def set_alarm(mqttclient, user_input):
     parsed_input = user_input.split(',')
-    username = parsed_input[0]
+    username = parsed_input[0].strip()
     if is_user_registered(username):
         mqttclient.publish(output_topic, payload="Username Verified!", qos=0, retain=False)
         mqttclient.publish(output_topic, payload="Setting Alarm...", qos=0, retain=False)
@@ -288,16 +299,17 @@ def on_message(mqttclient, userdata, msg):
     p = str(msg.payload.decode("utf-8"))
     if msg.topic == set_alarm_topic:
         set_alarm(mqttclient, p)
-
     elif msg.topic == register_user_topic:
         global awaiting_registration
         if awaiting_registration:
             parsed_input = p.split(',')
+            mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
             register_user(parsed_input[0])
+            mqttclient.publish(output_topic, payload="Registration complete!", qos=0, retain=False)
+            mqttclient.publish(output_topic, payload="Re-send request to set alarm", qos=0, retain=False)
             awaiting_registration = False
         else:
             mqttclient.publish(output_topic, payload="Wrong input to 'register_user'", qos=0, retain=False)
-
     elif msg.topic == retrieve_data_topic:
         # TODO retrieve_data
         retrieved_data = "Invalid Query"
@@ -305,11 +317,8 @@ def on_message(mqttclient, userdata, msg):
             retrieved_data = json.dumps(time_query_output, indent=2)
         elif re.match('^.*t&h.*', p):
             retrieved_data = json.dumps(t_and_h_query_output, indent=2)
-
+        
         mqttclient.publish(output_topic, payload=retrieved_data, qos=0, retain=False)
-
-    else:
-        mqttclient.publish(output_topic, payload="{} topic does not exist".format(msg.topic), qos=0, retain=False)
 
 
 def check_alarm():
@@ -331,15 +340,12 @@ def check_alarm():
             time.sleep(5)
             complete_face_detection = perform_facial_recognition(wake_up_duration, (max_wake_up_seconds + 20))
             mixer.stop()
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 150)
-            alarm_report = "Successfully Completed user's facial recognition!"
+            alarm_report = "Successfully Completed user's facial recognition."
 
             if not complete_face_detection:
-                alarm_report = "Did not succeed in recognizing the user's face during allowed alarm time"
+                alarm_report = "Unsuccessful in recognizing the user's face before alarm timeout."
 
-            engine.say(alarm_report)
-            engine.runAndWait()
+            speak_text(alarm_report)
             alarm_time = str(alarm_h) + ":" + str(alarm_m)
             insert_wake_up_time(user_name, wake_up_duration, complete_face_detection, get_12_hour_date_time(alarm_time))
 

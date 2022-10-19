@@ -7,3 +7,6 @@
 #Exclude SSL cert
 db_ssl_cert
 facial-encoding
+
+#Exclude mp3 files
+*.mp3
