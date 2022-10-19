@@ -283,7 +283,7 @@ def set_alarm(mqttclient, user_input):
 
 
 def on_message(mqttclient, userdata, msg):
-    while is_alarm_on:  # Will delay processing request when alarm is ringing.
+    while is_alarm_on:  # Will defer processing any request when alarm is ringing.
         time.sleep(0.5)
     p = str(msg.payload.decode("utf-8"))
     if msg.topic == set_alarm_topic:
@@ -307,7 +307,9 @@ def on_message(mqttclient, userdata, msg):
             retrieved_data = json.dumps(t_and_h_query_output, indent=2)
 
         mqttclient.publish(output_topic, payload=retrieved_data, qos=0, retain=False)
-    # TODO
+
+    else:
+        mqttclient.publish(output_topic, payload="{} topic does not exist".format(msg.topic), qos=0, retain=False)
 
 
 def check_alarm():
