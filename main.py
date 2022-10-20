@@ -34,11 +34,11 @@ db_config = {
 
 db_conn = None
 is_alarm_on = False
-alarm_h = 00
-alarm_m = 37
-alarm_day = "10/20/2022"
+alarm_h = None
+alarm_m = None
+alarm_day = None
 user_name = None
-wake_up_duration = 15
+wake_up_duration = None
 awaiting_registration = False
 
 v = vlc.Instance()
@@ -68,12 +68,26 @@ t_and_h_query_output = {"10/4/2022 12:30": {"Temp": "30 *F", "Humidity": "50%"}}
 
 
 def extract_hour_and_minute(input_time):
-    return 00, 21, True
-    # TODO for team member working on set_alarm
+    if re.match('\\d{1,2}:\\d{2}\\s[AP]M', input_time):
+        parsed_time = re.split(':|\\s', input_time)
+        h = int(parsed_time[0])
+        if parsed_time[2] == 'PM':
+            h += 12
+        elif h == 12:
+            h = 0
+        return h, parsed_time[1], True
+    else:
+        return None, None, False
+        
 
 
-def get_year():
+def get_date():
     return datetime.datetime.now().d.strftime("%m/%d/%Y")
+
+
+def get_12_hour_date_time(input_time):
+    twenty_four_hr_time = datetime.datetime.strptime(input_time, "%H:%M").strftime("%I:%M %p")
+    return alarm_day + " " + twenty_four_hr_time
 
 
 def speak_text(input_text):
@@ -83,14 +97,6 @@ def speak_text(input_text):
     p.play()
     time.sleep(5)
     
-    
-# example: 10/16/2022 12:50 PM
-def get_12_hour_date_time(input_t):
-    global alarm_day
-    print("here:" + input_t)
-    formatted_time = datetime.datetime.strptime(input_t, "%H:%M").strftime("%I:%M %p")
-    return alarm_day + " " + formatted_time
-
 
 def is_user_registered(input_username):
     cursor = db_conn.cursor()
@@ -336,6 +342,7 @@ def check_alarm():
     global alarm_m
     global alarm_h
     global user_name
+    global alarm_day
     while 1:
         current_h = int(strftime("%H"))
         current_m = int(strftime("%M"))
@@ -355,13 +362,14 @@ def check_alarm():
 
             speak_text(alarm_report)
             alarm_time = str(alarm_h) + ":" + str(alarm_m)
-            insert_wake_up_time(user_name, wake_up_duration, complete_face_detection, get_12_hour_date_time(alarm_time))
+            insert_wake_up_time(user_name, wake_up_duration, complete_face_detection, alarm_time)
 
             # flush alarm data
             alarm_m = None
             alarm_h = None
             wake_up_duration = None
             user_name = None
+            alarm_day = None
 
             is_alarm_on = False
             time.sleep(60)
