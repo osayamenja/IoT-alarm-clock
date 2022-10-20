@@ -34,8 +34,9 @@ db_config = {
 
 db_conn = None
 is_alarm_on = False
-alarm_h = None
-alarm_m = None
+alarm_h = 00
+alarm_m = 37
+alarm_day = "10/20/2022"
 user_name = None
 wake_up_duration = 15
 awaiting_registration = False
@@ -71,6 +72,10 @@ def extract_hour_and_minute(input_time):
     # TODO for team member working on set_alarm
 
 
+def get_year():
+    return datetime.datetime.now().d.strftime("%m/%d/%Y")
+
+
 def speak_text(input_text):
     tts = gTTS(input_text)
     tts.save(tts_file_path)
@@ -80,10 +85,11 @@ def speak_text(input_text):
     
     
 # example: 10/16/2022 12:50 PM
-def get_12_hour_date_time(input_time):
-    d = datetime.datetime.now()
-    formatted_time = datetime.datetime.strptime(input_time, "%H:%M").strftime("%I:%M %p")
-    return d.strftime("%m/%d/%Y") + " " + formatted_time
+def get_12_hour_date_time(input_t):
+    global alarm_day
+    print("here:" + input_t)
+    formatted_time = datetime.datetime.strptime(input_t, "%H:%M").strftime("%I:%M %p")
+    return alarm_day + " " + formatted_time
 
 
 def is_user_registered(input_username):
@@ -194,8 +200,8 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
     vs = VideoStream(usePiCamera=True).start()
     time.sleep(2.0)
     current_time = time.time()
-    wake_up_end = current_time + (60 * user_wake_up_time)
-    alarm_end = current_time + (alarm_timeout * 60)
+    wake_up_end = current_time + user_wake_up_time
+    alarm_end = current_time + alarm_timeout
     current_time = time.time()
     found_user = False
     speak_text("Starting facial recognition...")
@@ -213,7 +219,7 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
         if len(facial_encodings) == 0:
             found_user = False
             speak_text("User's Face is not detected. Please show your face to the camera")
-            wake_up_end = current_time + (60 * user_wake_up_time)
+            wake_up_end = current_time + user_wake_up_time
             time.sleep(2)
         
         else:
@@ -232,7 +238,7 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
             else:
                 found_user = False
                 speak_text("User's Face is not detected. Please show your face to the camera")
-                wake_up_end = current_time + (60 * user_wake_up_time)
+                wake_up_end = current_time + user_wake_up_time
                 time.sleep(2)
             
     vs.stop()
@@ -259,12 +265,14 @@ def configure_alarm(mqttclient, parsed_input, input_username):
     global alarm_h
     global wake_up_duration
     global user_name
+    global alarm_day
     h, m, is_time_valid = extract_hour_and_minute(input_time)
     w = parsed_input[2].strip()
 
     if is_time_valid and w.isnumeric() and int(w) <= max_wake_up_seconds:
         alarm_h = h
         alarm_m = m
+        alarm_day = get_year()
         wake_up_duration = int(w)
         user_name = input_username
         mqttclient.publish(output_topic, payload="Alarm set!", qos=0, retain=False)
@@ -335,7 +343,7 @@ def check_alarm():
         if (alarm_h == current_h) and (alarm_m == current_m):
 
             is_alarm_on = True
-            sound.play()
+            sound.play(-1)
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
             complete_face_detection = perform_facial_recognition(wake_up_duration, (max_wake_up_seconds + 20))
