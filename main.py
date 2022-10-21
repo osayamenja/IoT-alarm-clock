@@ -10,6 +10,10 @@ import face_recognition
 import pickle
 import imutils
 import datetime
+import threading
+import board
+import adafruit_dht
+import psutil
 
 from gtts import gTTS
 from picamera import PiCamera
@@ -60,6 +64,7 @@ tts_file_path = os.getenv('TTS_FILE_PATH')
 
 facial_data_table_name = os.getenv('FACIAL_DATA_TABLE_NAME')
 wake_up_duration_table_name = os.getenv('WAKE_DURATION_TABLE_NAME')
+t_and_h_table_name = os.getenv('T_AND_H_TABLE_NAME')
 
 # The below strings are sample JSON outputs for user queries.
 # They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
@@ -67,6 +72,63 @@ time_query_output = {"10/4/2022 12:30": "80 secs", "10/4/2022 11:30": "50 secs"}
 t_and_h_query_output = {"10/4/2022 12:30": {"Temp": "30 *F", "Humidity": "50%"}}
 
 
+# Format: 10/21/2022 12:00 AM
+def get_formatted_timestamp(input_datetime):
+    t = input_datetime.strftime("%H:%M")
+    result = datetime.datetime.strptime(t, "%H:%M").strftime("%I:%M %p")
+    return next_hour.strftime("%m/%d/%Y") + " " + result
+
+
+def get_next_hour_date_time():
+    delta = datetime.timedelta(hours=1)
+    now = datetime.datetime.now()
+    return (now + delta).replace(microsecond=0, second=0, minute=0)
+    
+    
+# job to upload ambient temperature and humidity hourly to a database 
+def temp_and_humidity_job(dht_device):
+    next_hour = get_next_hour_date_time()
+    while True:
+        if datetime.datetime.now() >= next_hour:
+            complete_upload_job = False
+            
+            # Reading sensor data occassionally causes errors hence the loop.
+            while not complete_upload_job:
+                try:
+                    temperature_c = dht_device.temperature
+                    temperature_f = temperature_c * (9 / 5) + 32
+                    humidity = dht_device.humidity
+                    
+                    
+                    upload_t_and_h_to_db(get_formatted_timestamp(next_hour), temperature_f, humidity)
+                    complete_upload_job = True
+                    
+                except RuntimeError as error:
+                    # Errors happen fairly often, DHT's are hard to read, just keep going
+                    print(error.args[0])
+                    time.sleep(2.0)
+                    continue
+                except Exception as error:
+                    dhtDevice.exit()
+                    raise error
+
+                time.sleep(2.0)
+            
+            next_hour = get_next_hour_date_time()
+        else:
+            time.sleep(1)
+
+
+def upload_t_and_h_to_db(recorded_datetime, temperature_f, humidity):
+    cursor = db_conn.cursor()
+    q = "INSERT INTO {} (recorded_on, temperature_F, humidity) VALUES (%s, %s, %s)"
+    q = q.format(t_and_h_table_name)
+    cursor.execute(q, (recorded_datetime, temperature_f, humidity))
+    db_conn.commit()
+    cursor.close()
+
+
+# 11:00 PM -> 23:00 
 def extract_hour_and_minute(input_time):
     if re.match('\\d{1,2}:\\d{2}\\s[AP]M', input_time):
         parsed_time = re.split(':|\\s', input_time)
@@ -82,12 +144,13 @@ def extract_hour_and_minute(input_time):
 
 
 def get_date():
-    return datetime.datetime.now().d.strftime("%m/%d/%Y")
+    return datetime.datetime.now().strftime("%m/%d/%Y")
 
 
+# 23:00 -> 11:00 PM
 def get_12_hour_date_time(input_time):
-    twenty_four_hr_time = datetime.datetime.strptime(input_time, "%H:%M").strftime("%I:%M %p")
-    return alarm_day + " " + twenty_four_hr_time
+    twelve_hr_time = datetime.datetime.strptime(input_time, "%H:%M").strftime("%I:%M %p")
+    return alarm_day + " " + twelve_hr_time
 
 
 def speak_text(input_text):
@@ -278,7 +341,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
     if is_time_valid and w.isnumeric() and int(w) <= max_wake_up_seconds:
         alarm_h = h
         alarm_m = m
-        alarm_day = get_year()
+        alarm_day = get_date()
         wake_up_duration = int(w)
         user_name = input_username
         mqttclient.publish(output_topic, payload="Alarm set!", qos=0, retain=False)
@@ -343,7 +406,7 @@ def check_alarm():
     global alarm_h
     global user_name
     global alarm_day
-    while 1:
+    while True:
         current_h = int(strftime("%H"))
         current_m = int(strftime("%M"))
 
@@ -372,9 +435,6 @@ def check_alarm():
             alarm_day = None
 
             is_alarm_on = False
-            time.sleep(60)
-
-        time.sleep(10)
 
 
 def init_database():
@@ -392,10 +452,22 @@ def init_database():
         return conn
 
 
+def init_sensor():
+    for proc in psutil.process_iter():
+        if proc.name() == 'libgpiod_pulsein' or proc.name() == 'libgpiod_pulsei':
+            proc.kill()
+    return adafruit_dht.DHT11(board.D23)
+
+
 if __name__ == "__main__":
+    dht_device = init_sensor()
+    t_and_h_upload_worker = threading.Thread(target=temp_and_humidity_job, args=(dht_device,), daemon=True)
+    print("Starting temperature and humidity upload worker...")
+    t_and_h_upload_worker.start()
+    
     # establish db connection
     db_conn = init_database()
-
+    
     broker_address = "broker.emqx.io"
     broker_port_number = 1883
     broker_keep_alive_time = 60
