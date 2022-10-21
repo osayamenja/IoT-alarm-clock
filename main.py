@@ -76,7 +76,7 @@ t_and_h_query_output = {"10/4/2022 12:30": {"Temp": "30 *F", "Humidity": "50%"}}
 def get_formatted_timestamp(input_datetime):
     t = input_datetime.strftime("%H:%M")
     result = datetime.datetime.strptime(t, "%H:%M").strftime("%I:%M %p")
-    return next_hour.strftime("%m/%d/%Y") + " " + result
+    return input_datetime.strftime("%m/%d/%Y") + " " + result
 
 
 def get_next_hour_date_time():
@@ -108,7 +108,7 @@ def temp_and_humidity_job(dht_device):
                     time.sleep(2.0)
                     continue
                 except Exception as error:
-                    dhtDevice.exit()
+                    dht_device.exit()
                     raise error
 
                 time.sleep(2.0)
