@@ -377,9 +377,8 @@ def on_message(mqttclient, userdata, msg):
     elif msg.topic == register_user_topic:
         global awaiting_registration
         if awaiting_registration:
-            parsed_input = mqtt_payload.split(',')
             mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
-            register_user(parsed_input[0])
+            register_user(mqtt_payload)
             mqttclient.publish(output_topic, payload="Registration complete!", qos=0, retain=False)
             mqttclient.publish(output_topic, payload="Re-send request to set alarm", qos=0, retain=False)
             awaiting_registration = False
