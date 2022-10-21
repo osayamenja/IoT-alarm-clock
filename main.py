@@ -136,7 +136,7 @@ def extract_hour_and_minute(input_time):
             h += 12
         elif h == 12:
             h = 0
-        return h, parsed_time[1], True
+        return h, int(parsed_time[1]), True
     else:
         return None, None, False
 
@@ -315,7 +315,8 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
         return False
 
 
-def register_user(input_username):
+def register_user(mqttclient, input_username):
+    mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
     persist_images_to_disk()
     train_model()
     upload_encodings_to_db(input_username)
@@ -342,6 +343,9 @@ def configure_alarm(mqttclient, parsed_input, input_username):
         alarm_day = get_date()
         wake_up_duration = int(w)
         user_name = input_username
+        print(alarm_h)
+        print(alarm_m)
+        print(wake_up_duration)
         mqttclient.publish(output_topic, payload="Alarm set!", qos=0, retain=False)
 
     elif not is_time_valid:
@@ -377,8 +381,7 @@ def on_message(mqttclient, userdata, msg):
     elif msg.topic == register_user_topic:
         global awaiting_registration
         if awaiting_registration:
-            mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
-            register_user(mqtt_payload)
+            register_user(mqttclient, mqtt_payload)
             mqttclient.publish(output_topic, payload="Registration complete!", qos=0, retain=False)
             mqttclient.publish(output_topic, payload="Re-send request to set alarm", qos=0, retain=False)
             awaiting_registration = False
