@@ -83,26 +83,25 @@ def get_next_hour_date_time():
     delta = datetime.timedelta(hours=1)
     now = datetime.datetime.now()
     return (now + delta).replace(microsecond=0, second=0, minute=0)
-    
-    
+
+
 # job to upload ambient temperature and humidity hourly to a database 
 def temp_and_humidity_job(dht_device):
     next_hour = get_next_hour_date_time()
     while True:
         if datetime.datetime.now() >= next_hour:
             complete_upload_job = False
-            
-            # Reading sensor data occassionally causes errors hence the loop.
+
+            # Reading sensor data occasionally causes errors hence the loop.
             while not complete_upload_job:
                 try:
                     temperature_c = dht_device.temperature
                     temperature_f = temperature_c * (9 / 5) + 32
                     humidity = dht_device.humidity
-                    
-                    
+
                     upload_t_and_h_to_db(get_formatted_timestamp(next_hour), temperature_f, humidity)
                     complete_upload_job = True
-                    
+
                 except RuntimeError as error:
                     # Errors happen fairly often, DHT's are hard to read, just keep going
                     print(error.args[0])
@@ -113,7 +112,7 @@ def temp_and_humidity_job(dht_device):
                     raise error
 
                 time.sleep(2.0)
-            
+
             next_hour = get_next_hour_date_time()
         else:
             time.sleep(1)
@@ -140,7 +139,6 @@ def extract_hour_and_minute(input_time):
         return h, parsed_time[1], True
     else:
         return None, None, False
-        
 
 
 def get_date():
@@ -150,7 +148,7 @@ def get_date():
 # 23:00 -> 11:00 PM
 def get_12_hour_date_time(input_time):
     twelve_hr_time = datetime.datetime.strptime(input_time, "%H:%M").strftime("%I:%M %p")
-    return alarm_day + " " + twelve_hr_time
+    return str(alarm_day) + " " + twelve_hr_time
 
 
 def speak_text(input_text):
@@ -159,7 +157,7 @@ def speak_text(input_text):
     p.set_media(v.media_new(tts_file_path))
     p.play()
     time.sleep(5)
-    
+
 
 def is_user_registered(input_username):
     cursor = db_conn.cursor()
@@ -215,10 +213,10 @@ def persist_images_to_disk():
     cam.framerate = 10
     raw_capture = PiRGBArray(cam, size=(512, 304))
     img_counter = 0
-    
+
     speak_text("Please look at the camera and stay still for five seconds. Photo capture will begin in five seconds")
     time.sleep(5)
-    
+
     for frame in cam.capture_continuous(raw_capture, format="bgr", use_video_port=True):
         image = frame.array
         raw_capture.truncate(0)
@@ -230,7 +228,7 @@ def persist_images_to_disk():
         time.sleep(0.5)
         if img_counter == 12:
             break
-        
+
     speak_text("Photo capture is complete!")
     cv2.destroyAllWindows()
 
@@ -284,13 +282,13 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
         boxes = face_recognition.face_locations(frame)
         # compute the facial embeddings for the user's face bounding box
         facial_encodings = face_recognition.face_encodings(frame, boxes)
-        
+
         if len(facial_encodings) == 0:
             found_user = False
             speak_text("User's Face is not detected. Please show your face to the camera")
             wake_up_end = current_time + user_wake_up_time
             time.sleep(2)
-        
+
         else:
             encoding = face_recognition.face_encodings(frame, boxes)[0]
 
@@ -309,7 +307,7 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
                 speak_text("User's Face is not detected. Please show your face to the camera")
                 wake_up_end = current_time + user_wake_up_time
                 time.sleep(2)
-            
+
     vs.stop()
     if current_time < alarm_end:
         return True
@@ -373,13 +371,13 @@ def set_alarm(mqttclient, user_input):
 def on_message(mqttclient, userdata, msg):
     while is_alarm_on:  # Will defer processing any request when alarm is ringing.
         time.sleep(0.5)
-    p = str(msg.payload.decode("utf-8"))
+    mqtt_payload = str(msg.payload.decode("utf-8"))
     if msg.topic == set_alarm_topic:
-        set_alarm(mqttclient, p)
+        set_alarm(mqttclient, mqtt_payload)
     elif msg.topic == register_user_topic:
         global awaiting_registration
         if awaiting_registration:
-            parsed_input = p.split(',')
+            parsed_input = mqtt_payload.split(',')
             mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
             register_user(parsed_input[0])
             mqttclient.publish(output_topic, payload="Registration complete!", qos=0, retain=False)
@@ -390,11 +388,11 @@ def on_message(mqttclient, userdata, msg):
     elif msg.topic == retrieve_data_topic:
         # TODO retrieve_data
         retrieved_data = "Invalid Query"
-        if re.match('^.*wakeupTime.*', p):
+        if re.match('^.*wakeupTime.*', mqtt_payload):
             retrieved_data = json.dumps(time_query_output, indent=2)
-        elif re.match('^.*t&h.*', p):
+        elif re.match('^.*t&h.*', mqtt_payload):
             retrieved_data = json.dumps(t_and_h_query_output, indent=2)
-        
+
         mqttclient.publish(output_topic, payload=retrieved_data, qos=0, retain=False)
 
 
@@ -460,14 +458,14 @@ def init_sensor():
 
 
 if __name__ == "__main__":
-    dht_device = init_sensor()
-    t_and_h_upload_worker = threading.Thread(target=temp_and_humidity_job, args=(dht_device,), daemon=True)
+    dht_sensor = init_sensor()
+    t_and_h_upload_worker = threading.Thread(target=temp_and_humidity_job, args=(dht_sensor,), daemon=True)
     print("Starting temperature and humidity upload worker...")
     t_and_h_upload_worker.start()
-    
+
     # establish db connection
     db_conn = init_database()
-    
+
     broker_address = "broker.emqx.io"
     broker_port_number = 1883
     broker_keep_alive_time = 60
