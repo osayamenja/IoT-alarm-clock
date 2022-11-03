@@ -120,7 +120,7 @@ def temp_and_humidity_job(dht_device):
 
 def upload_t_and_h_to_db(recorded_datetime, temperature_f, humidity):
     cursor = db_conn.cursor()
-    q = "INSERT INTO {} (recorded_on, temperature_F, humidity) VALUES (%s, %s, %s)"
+    q = "INSERT INTO {} (recorded_on, temp_F, humidity) VALUES (%s, %s, %s)"
     q = q.format(t_and_h_table_name)
     cursor.execute(q, (recorded_datetime, temperature_f, humidity))
     db_conn.commit()
@@ -372,6 +372,10 @@ def set_alarm(mqttclient, user_input):
         mqttclient.publish(output_topic, payload=response, qos=0, retain=False)
 
 
+def is_username_valid(username):
+    return username.isalnum()
+
+
 def on_message(mqttclient, userdata, msg):
     while is_alarm_on:  # Will defer processing any request when alarm is ringing.
         time.sleep(0.5)
@@ -380,7 +384,8 @@ def on_message(mqttclient, userdata, msg):
         set_alarm(mqttclient, mqtt_payload)
     elif msg.topic == register_user_topic:
         global awaiting_registration
-        if awaiting_registration:
+        u = mqtt_payload.split(',')[0].strip()
+        if is_username_valid(u) and (awaiting_registration or not is_user_registered(u)):
             register_user(mqttclient, mqtt_payload)
             mqttclient.publish(output_topic, payload="Registration complete!", qos=0, retain=False)
             mqttclient.publish(output_topic, payload="Re-send request to set alarm", qos=0, retain=False)
@@ -468,9 +473,9 @@ if __name__ == "__main__":
     # establish db connection
     db_conn = init_database()
 
-    broker_address = "broker.emqx.io"
-    broker_port_number = 1883
-    broker_keep_alive_time = 60
+    broker_address = os.getenv('BROKER_ADDRESS')
+    broker_port_number = int(os.getenv('BROKER_PORT_NUMBER'))
+    broker_keep_alive_time = int(os.getenv('BROKER_KEEP_ALIVE_TIME'))
 
     client = mqtt.Client()
     client.on_connect = on_connect
