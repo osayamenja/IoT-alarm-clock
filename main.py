@@ -92,7 +92,7 @@ def temp_and_humidity_job(dht_device):
         if datetime.datetime.now() >= next_hour:
             complete_upload_job = False
 
-            # Reading sensor data occasionally causes errors hence the loop.
+            # Reading sensor data occasionally causes errors, hence the loop.
             while not complete_upload_job:
                 try:
                     temperature_c = dht_device.temperature
@@ -103,7 +103,7 @@ def temp_and_humidity_job(dht_device):
                     complete_upload_job = True
 
                 except RuntimeError as error:
-                    # Errors happen fairly often, DHT's are hard to read, just keep going
+                    # Errors happen fairly often, DHT sensors are hard to read, just keep going
                     print(error.args[0])
                     time.sleep(2.0)
                     continue
