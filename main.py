@@ -1,5 +1,6 @@
 import json
 import time
+import glob
 import paho.mqtt.client as mqtt
 import re
 import os
@@ -50,7 +51,8 @@ p = v.media_player_new()
 set_alarm_topic = 'raspberry/alarmclock/set_alarm'
 retrieve_data_topic = 'raspberry/alarmclock/retrieve_data'
 register_user_topic = 'raspberry/alarmclock/register_user'
-input_topics = [set_alarm_topic, retrieve_data_topic, register_user_topic]
+delete_user_topic = 'raspberry/alarmclock/delete_user'
+input_topics = [set_alarm_topic, retrieve_data_topic, register_user_topic, delete_user_topic]
 
 output_topic = 'raspberry/alarmclock/status'
 mixer.init()
@@ -255,9 +257,9 @@ def upload_encodings_to_db(input_username):
 
 def persist_images_to_disk():
     cam = PiCamera()
-    cam.resolution = (512, 304)
+    cam.resolution = (640, 480)
     cam.framerate = 10
-    raw_capture = PiRGBArray(cam, size=(512, 304))
+    raw_capture = PiRGBArray(cam, size=(640, 480))
     img_counter = 0
 
     speak_text("Please look at the camera and stay still for five seconds. Photo capture will begin in five seconds")
@@ -272,7 +274,7 @@ def persist_images_to_disk():
         print("{} written!".format(img_name))
         img_counter += 1
         time.sleep(0.5)
-        if img_counter == 12:
+        if img_counter == 40:
             break
 
     speak_text("Photo capture is complete!")
@@ -316,11 +318,11 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
     current_time = time.time()
     wake_up_end = current_time + user_wake_up_time
     alarm_end = current_time + alarm_timeout
-    current_time = time.time()
     found_user = False
     speak_text("Starting facial recognition...")
 
     while current_time < wake_up_end and current_time < alarm_end:
+        current_time = time.time()
         # grab the frame from the threaded video stream and resize it
         # to 500px (to speedup processing)
         frame = vs.read()
@@ -341,8 +343,6 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
 
             matches = face_recognition.compare_faces(data["encodings"], encoding)
 
-            # update time
-            current_time = time.time()
             if True in matches:
                 if not found_user:
                     found_user = True
@@ -362,6 +362,19 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
         return False
 
 
+def delete_user(input_username):
+    cursor = db_conn.cursor()
+    cursor.execute("DELETE FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
+    db_conn.commit()
+    cursor.close()
+
+
+def delete_files(file_path):
+    files = glob.glob(file_path + '/.*')
+    for f in files:
+        os.remove(f)
+    
+    
 def register_user(mqttclient, input_username):
     mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
     persist_images_to_disk()
@@ -431,21 +444,31 @@ def on_message(mqttclient, userdata, msg):
         set_alarm(mqttclient, mqtt_payload)
     elif msg.topic == register_user_topic:
         global awaiting_registration
-        u = mqtt_payload.split(',')[0].strip()
+        u = mqtt_payload
         if is_username_valid(u) and (awaiting_registration or not is_user_registered(u)):
-            register_user(mqttclient, mqtt_payload)
+            register_user(mqttclient, u)
             mqttclient.publish(output_topic, payload="Registration complete!", qos=0, retain=False)
             mqttclient.publish(output_topic, payload="Re-send request to set alarm", qos=0, retain=False)
             awaiting_registration = False
         else:
             mqttclient.publish(output_topic, payload="Wrong input to 'register_user'", qos=0, retain=False)
+    elif msg.topic == delete_user_topic:
+        u = mqtt_payload
+        if is_username_valid(u):
+            if is_user_registered(u):
+                delete_user(mqtt_payload)
+                mqttclient.publish(output_topic, payload="Username is deleted", qos=0, retain=False)
+            else:
+                mqttclient.publish(output_topic, payload="Username is not registered", qos=0, retain=False)
+        else:
+            mqttclient.publish(output_topic, payload="Invalid username", qos=0, retain=False)
     elif msg.topic == retrieve_data_topic:
         retrieved_data = "Invalid Query"
         if re.match('^[a-zA-Z0-9]*,\\s*wake_duration,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
             retrieved_data = json.dumps(time_query_output, indent=2)
 
         elif re.match('^t&h,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
-            query_param = mqtt_payload.split(',')[1]
+            query_param = mqtt_payload.split(',')[1].strip()
             query_output = ""
 
             # X days ago
@@ -480,7 +503,7 @@ def check_alarm():
             sound.play(-1)
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
-            complete_face_detection = perform_facial_recognition(wake_up_duration, (max_wake_up_seconds + 10))
+            complete_face_detection = perform_facial_recognition(wake_up_duration, (int(max_wake_up_seconds) + 10))
             mixer.stop()
             alarm_report = "Successfully Completed user's facial recognition."
 
@@ -497,7 +520,8 @@ def check_alarm():
             wake_up_duration = None
             user_name = None
             alarm_day = None
-
+            delete_files(image_data_file_path)
+            
             is_alarm_on = False
 
 
