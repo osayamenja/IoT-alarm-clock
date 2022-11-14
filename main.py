@@ -132,18 +132,22 @@ def extract_hour_and_minute(input_time):
     if re.match('\\d{1,2}:\\d{2}\\s[AP]M', input_time):
         parsed_time = re.split(':|\\s', input_time)
         h = int(parsed_time[0])
-        
+        m = int(parsed_time[1])
+
+        if h > 12 or m > 59:
+            return None, None, False
+
         if h == 12:
             h = 0
         if parsed_time[2] == 'PM':
             h += 12
-        return h, int(parsed_time[1]), True
+        return h, m, True
     else:
         return None, None, False
 
 
-def get_date():
-    return datetime.datetime.now().strftime("%m/%d/%Y")
+def get_date(from_date_time: datetime.datetime = datetime.datetime.now()):
+    return from_date_time.strftime("%m/%d/%Y")
 
 
 # 23:00 -> 11:00 PM
@@ -169,24 +173,45 @@ def is_user_registered(input_username):
     return result > 0
 
 
-def get_temp_and_h_specific_date(input_datetime):
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT temp_F, humidity FROM temp_and_humidity where recorded_on = %s".format(
-        get_formatted_timestamp(input_datetime)))
-    temp_and_h = cursor.fetchall()[0]
-    db_conn.commit()
-    cursor.close()
-    return temp_and_h[0], temp_and_h[1]
+def build_data_dict(data_collection, columns_collection):
+    result = {}
+
+    for row in data_collection:
+        i = 0
+        recorded_on = row[i]
+        nested_result = {}
+
+        for col in columns_collection:
+            i = i + 1
+            nested_result[str(col)] = row[i]
+
+        result[recorded_on] = nested_result
+
+    return result
 
 
-def get_temp_and_h_date_range(input_datetime):
+def get_temp_and_h_specific_date(in_date):
+    in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
+    return get_temp_and_h_date_range(in_date, to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
+
+
+def get_shifted_date_time(from_date_time: datetime.datetime = datetime.datetime.now(), delta=0, subtract=True):
+    delta = datetime.timedelta(days=delta)
+    if not subtract:
+        return from_date_time + delta
+    return from_date_time - delta
+
+
+def get_temp_and_h_date_range(date_for_query, to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
+    q = "SELECT recorded_on, temp_F, humidity FROM {} " \
+        "where recorded_on >= %s and recorded_on < %s".format(t_and_h_table_name)
+
     cursor = db_conn.cursor()
-    cursor.execute("SELECT temp_F, humidity FROM temp_and_humidity where recorded_on >= %s".format(
-        get_formatted_timestamp(input_datetime)))
+    cursor.execute(q, (date_for_query, to_date))
     temp_and_h = cursor.fetchall()
     db_conn.commit()
     cursor.close()
-    return temp_and_h
+    return build_data_dict(temp_and_h, ['Temp (*F)', "Humidity (%)"])
 
 
 def convert_to_binary_data(filename):
@@ -415,12 +440,24 @@ def on_message(mqttclient, userdata, msg):
         else:
             mqttclient.publish(output_topic, payload="Wrong input to 'register_user'", qos=0, retain=False)
     elif msg.topic == retrieve_data_topic:
-        # TODO retrieve_data
         retrieved_data = "Invalid Query"
-        if re.match('^.*wakeupTime.*', mqtt_payload):
+        if re.match('^[a-zA-Z0-9]*,\\s*wake_duration,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
             retrieved_data = json.dumps(time_query_output, indent=2)
-        elif re.match('^.*t&h.*', mqtt_payload):
-            retrieved_data = json.dumps(t_and_h_query_output, indent=2)
+
+        elif re.match('^t&h,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
+            query_param = mqtt_payload.split(',')[1]
+            query_output = ""
+
+            # X days ago
+            if query_param.isnumeric():
+                input_date = get_date(get_shifted_date_time(delta=int(query_param)))
+                query_output = get_temp_and_h_date_range(input_date)
+            else:  # specific date
+                t = datetime.datetime.strptime(query_param, "%m/%d/%Y")
+                d = get_date(get_shifted_date_time(t, delta=1, subtract=False))
+                query_output = get_temp_and_h_date_range(query_param, to_date=d)
+
+            retrieved_data = json.dumps(query_output, indent=2)
 
         mqttclient.publish(output_topic, payload=retrieved_data, qos=0, retain=False)
 
