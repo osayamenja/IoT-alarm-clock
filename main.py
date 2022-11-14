@@ -58,7 +58,7 @@ alarm_sound_file_path = os.getenv('ALARM_SOUND_FILE_PATH')
 sound = mixer.Sound(alarm_sound_file_path)
 encoding_data_file_path = os.getenv('ENCODING_DATA_FILE_PATH')
 image_data_file_path = os.getenv('IMAGE_DATA_FILE_PATH')
-max_wake_up_seconds = 30
+max_wake_up_seconds = 15
 
 tts_file_path = os.getenv('TTS_FILE_PATH')
 
@@ -132,10 +132,11 @@ def extract_hour_and_minute(input_time):
     if re.match('\\d{1,2}:\\d{2}\\s[AP]M', input_time):
         parsed_time = re.split(':|\\s', input_time)
         h = int(parsed_time[0])
+        
+        if h == 12:
+            h = 0
         if parsed_time[2] == 'PM':
             h += 12
-        elif h == 12:
-            h = 0
         return h, int(parsed_time[1]), True
     else:
         return None, None, False
@@ -231,6 +232,7 @@ def persist_images_to_disk():
 
     speak_text("Photo capture is complete!")
     cv2.destroyAllWindows()
+    cam.close()
 
 
 # Source: https://core-electronics.com.au/guides/face-identify-raspberry-pi/#What
@@ -421,7 +423,7 @@ def check_alarm():
             sound.play(-1)
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
-            complete_face_detection = perform_facial_recognition(wake_up_duration, (max_wake_up_seconds + 20))
+            complete_face_detection = perform_facial_recognition(wake_up_duration, (max_wake_up_seconds + 10))
             mixer.stop()
             alarm_report = "Successfully Completed user's facial recognition."
 

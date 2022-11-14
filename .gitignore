@@ -10,3 +10,6 @@ facial-encoding
 
 #Exclude mp3 files
 *.mp3
+
+#Exclude xml files
+*.xml
