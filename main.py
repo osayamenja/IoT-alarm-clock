@@ -169,6 +169,26 @@ def is_user_registered(input_username):
     return result > 0
 
 
+def get_temp_and_h_specific_date(input_datetime):
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT temp_F, humidity FROM temp_and_humidity where recorded_on = %s".format(
+        get_formatted_timestamp(input_datetime)))
+    temp_and_h = cursor.fetchall()[0]
+    db_conn.commit()
+    cursor.close()
+    return temp_and_h[0], temp_and_h[1]
+
+
+def get_temp_and_h_date_range(input_datetime):
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT temp_F, humidity FROM temp_and_humidity where recorded_on >= %s".format(
+        get_formatted_timestamp(input_datetime)))
+    temp_and_h = cursor.fetchall()
+    db_conn.commit()
+    cursor.close()
+    return temp_and_h
+
+
 def convert_to_binary_data(filename):
     with open(filename, 'rb') as file:
         b = file.read()
