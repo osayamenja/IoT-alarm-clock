@@ -255,7 +255,7 @@ def upload_encodings_to_db(input_username):
     cursor.close()
 
 
-def persist_images_to_disk():
+def capture_and_persist_images_to_disk():
     cam = PiCamera()
     cam.resolution = (640, 480)
     cam.framerate = 10
@@ -377,8 +377,9 @@ def delete_files(file_path):
     
 def register_user(mqttclient, input_username):
     mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
-    persist_images_to_disk()
+    capture_and_persist_images_to_disk()
     train_model()
+    delete_files(image_data_file_path)
     upload_encodings_to_db(input_username)
 
 
@@ -520,7 +521,7 @@ def check_alarm():
             wake_up_duration = None
             user_name = None
             alarm_day = None
-            delete_files(image_data_file_path)
+            delete_files(encoding_data_file_path)
             
             is_alarm_on = False
 
