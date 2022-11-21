@@ -1,5 +1,6 @@
 import json
 import time
+import shutil
 import paho.mqtt.client as mqtt
 import re
 import os
@@ -50,7 +51,8 @@ p = v.media_player_new()
 set_alarm_topic = 'raspberry/alarmclock/set_alarm'
 retrieve_data_topic = 'raspberry/alarmclock/retrieve_data'
 register_user_topic = 'raspberry/alarmclock/register_user'
-input_topics = [set_alarm_topic, retrieve_data_topic, register_user_topic]
+delete_user_topic = 'raspberry/alarmclock/delete_user'
+input_topics = [set_alarm_topic, retrieve_data_topic, register_user_topic, delete_user_topic]
 
 output_topic = 'raspberry/alarmclock/status'
 mixer.init()
@@ -58,7 +60,8 @@ alarm_sound_file_path = os.getenv('ALARM_SOUND_FILE_PATH')
 sound = mixer.Sound(alarm_sound_file_path)
 encoding_data_file_path = os.getenv('ENCODING_DATA_FILE_PATH')
 image_data_file_path = os.getenv('IMAGE_DATA_FILE_PATH')
-max_wake_up_seconds = 30
+encoding_dir_file_path = os.getenv('ENCODING_DIR_FILE_PATH')
+max_facial_recog_duration = 15
 
 tts_file_path = os.getenv('TTS_FILE_PATH')
 
@@ -132,17 +135,22 @@ def extract_hour_and_minute(input_time):
     if re.match('\\d{1,2}:\\d{2}\\s[AP]M', input_time):
         parsed_time = re.split(':|\\s', input_time)
         h = int(parsed_time[0])
+        m = int(parsed_time[1])
+
+        if h > 12 or m > 59:
+            return None, None, False
+
+        if h == 12:
+            h = 0
         if parsed_time[2] == 'PM':
             h += 12
-        elif h == 12:
-            h = 0
-        return h, int(parsed_time[1]), True
+        return h, m, True
     else:
         return None, None, False
 
 
-def get_date():
-    return datetime.datetime.now().strftime("%m/%d/%Y")
+def get_date(from_date_time: datetime.datetime = datetime.datetime.now()):
+    return from_date_time.strftime("%m/%d/%Y")
 
 
 # 23:00 -> 11:00 PM
@@ -168,24 +176,45 @@ def is_user_registered(input_username):
     return result > 0
 
 
-def get_temp_and_h_specific_date(input_datetime):
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT temp_F, humidity FROM temp_and_humidity where recorded_on = %s".format(
-        get_formatted_timestamp(input_datetime)))
-    temp_and_h = cursor.fetchall()[0]
-    db_conn.commit()
-    cursor.close()
-    return temp_and_h[0], temp_and_h[1]
+def build_data_dict(data_collection, columns_collection):
+    result = {}
+
+    for row in data_collection:
+        i = 0
+        recorded_on = row[i]
+        nested_result = {}
+
+        for col in columns_collection:
+            i = i + 1
+            nested_result[str(col)] = row[i]
+
+        result[recorded_on] = nested_result
+
+    return result
 
 
-def get_temp_and_h_date_range(input_datetime):
+def get_temp_and_h_specific_date(in_date):
+    in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
+    return get_temp_and_h_date_range(in_date, to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
+
+
+def get_shifted_date_time(from_date_time: datetime.datetime = datetime.datetime.now(), delta=0, subtract=True):
+    delta = datetime.timedelta(days=delta)
+    if not subtract:
+        return from_date_time + delta
+    return from_date_time - delta
+
+
+def get_temp_and_h_date_range(date_for_query, to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
+    q = "SELECT recorded_on, temp_F, humidity FROM {} " \
+        "where recorded_on >= %s and recorded_on < %s".format(t_and_h_table_name)
+
     cursor = db_conn.cursor()
-    cursor.execute("SELECT temp_F, humidity FROM temp_and_humidity where recorded_on >= %s".format(
-        get_formatted_timestamp(input_datetime)))
+    cursor.execute(q, (date_for_query, to_date))
     temp_and_h = cursor.fetchall()
     db_conn.commit()
     cursor.close()
-    return temp_and_h
+    return build_data_dict(temp_and_h, ['Temp (*F)', "Humidity (%)"])
 
 
 def convert_to_binary_data(filename):
@@ -227,11 +256,11 @@ def upload_encodings_to_db(input_username):
     cursor.close()
 
 
-def persist_images_to_disk():
+def capture_and_persist_images_to_disk():
     cam = PiCamera()
-    cam.resolution = (512, 304)
+    cam.resolution = (640, 480)
     cam.framerate = 10
-    raw_capture = PiRGBArray(cam, size=(512, 304))
+    raw_capture = PiRGBArray(cam, size=(640, 480))
     img_counter = 0
 
     speak_text("Please look at the camera and stay still for five seconds. Photo capture will begin in five seconds")
@@ -246,11 +275,12 @@ def persist_images_to_disk():
         print("{} written!".format(img_name))
         img_counter += 1
         time.sleep(0.5)
-        if img_counter == 12:
+        if img_counter == 40:
             break
 
     speak_text("Photo capture is complete!")
     cv2.destroyAllWindows()
+    cam.close()
 
 
 # Source: https://core-electronics.com.au/guides/face-identify-raspberry-pi/#What
@@ -289,11 +319,11 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
     current_time = time.time()
     wake_up_end = current_time + user_wake_up_time
     alarm_end = current_time + alarm_timeout
-    current_time = time.time()
     found_user = False
     speak_text("Starting facial recognition...")
 
     while current_time < wake_up_end and current_time < alarm_end:
+        current_time = time.time()
         # grab the frame from the threaded video stream and resize it
         # to 500px (to speedup processing)
         frame = vs.read()
@@ -314,8 +344,6 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
 
             matches = face_recognition.compare_faces(data["encodings"], encoding)
 
-            # update time
-            current_time = time.time()
             if True in matches:
                 if not found_user:
                     found_user = True
@@ -335,10 +363,27 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
         return False
 
 
+def delete_user(input_username):
+    cursor = db_conn.cursor()
+    cursor.execute("DELETE FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
+    db_conn.commit()
+    cursor.close()
+
+
+def delete_files(file_path):
+    for files in os.listdir(file_path):
+        path = os.path.join(file_path, files)
+        try:
+            shutil.rmtree(path)
+        except OSError:
+            os.remove(path)
+    
+    
 def register_user(mqttclient, input_username):
     mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
-    persist_images_to_disk()
+    capture_and_persist_images_to_disk()
     train_model()
+    delete_files(image_data_file_path)
     upload_encodings_to_db(input_username)
 
 
@@ -357,7 +402,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
     h, m, is_time_valid = extract_hour_and_minute(input_time)
     w = parsed_input[2].strip()
 
-    if is_time_valid and w.isnumeric() and int(w) <= max_wake_up_seconds:
+    if is_time_valid and w.isnumeric() and int(w) <= max_facial_recog_duration:
         alarm_h = h
         alarm_m = m
         alarm_day = get_date()
@@ -372,7 +417,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
         mqttclient.publish(output_topic, payload="Invalid input, please reenter request", qos=0, retain=False)
 
     else:
-        response = f"Invalid wakeup time, range is 0 to {max_wake_up_seconds}"
+        response = f"Invalid wakeup time, range is 0 to {max_facial_recog_duration}"
         mqttclient.publish(output_topic, payload=response, qos=0, retain=False)
 
 
@@ -404,21 +449,43 @@ def on_message(mqttclient, userdata, msg):
         set_alarm(mqttclient, mqtt_payload)
     elif msg.topic == register_user_topic:
         global awaiting_registration
-        u = mqtt_payload.split(',')[0].strip()
+        u = mqtt_payload
         if is_username_valid(u) and (awaiting_registration or not is_user_registered(u)):
-            register_user(mqttclient, mqtt_payload)
+            register_user(mqttclient, u)
             mqttclient.publish(output_topic, payload="Registration complete!", qos=0, retain=False)
             mqttclient.publish(output_topic, payload="Re-send request to set alarm", qos=0, retain=False)
             awaiting_registration = False
         else:
             mqttclient.publish(output_topic, payload="Wrong input to 'register_user'", qos=0, retain=False)
+    elif msg.topic == delete_user_topic:
+        u = mqtt_payload
+        if is_username_valid(u):
+            if is_user_registered(u):
+                delete_user(mqtt_payload)
+                mqttclient.publish(output_topic, payload="Username is deleted", qos=0, retain=False)
+            else:
+                mqttclient.publish(output_topic, payload="Username is not registered", qos=0, retain=False)
+        else:
+            mqttclient.publish(output_topic, payload="Invalid username", qos=0, retain=False)
     elif msg.topic == retrieve_data_topic:
-        # TODO retrieve_data
         retrieved_data = "Invalid Query"
-        if re.match('^.*wakeupTime.*', mqtt_payload):
+        if re.match('^[a-zA-Z0-9]*,\\s*wake_duration,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
             retrieved_data = json.dumps(time_query_output, indent=2)
-        elif re.match('^.*t&h.*', mqtt_payload):
-            retrieved_data = json.dumps(t_and_h_query_output, indent=2)
+
+        elif re.match('^t&h,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
+            query_param = mqtt_payload.split(',')[1].strip()
+            query_output = ""
+
+            # X days ago
+            if query_param.isnumeric():
+                input_date = get_date(get_shifted_date_time(delta=int(query_param)))
+                query_output = get_temp_and_h_date_range(input_date)
+            else:  # specific date
+                t = datetime.datetime.strptime(query_param, "%m/%d/%Y")
+                d = get_date(get_shifted_date_time(t, delta=1, subtract=False))
+                query_output = get_temp_and_h_date_range(query_param, to_date=d)
+
+            retrieved_data = json.dumps(query_output, indent=2)
 
         mqttclient.publish(output_topic, payload=retrieved_data, qos=0, retain=False)
 
@@ -426,7 +493,7 @@ def on_message(mqttclient, userdata, msg):
 def check_alarm():
     global is_alarm_on
     global wake_up_duration
-    global max_wake_up_seconds
+    global max_facial_recog_duration
     global alarm_m
     global alarm_h
     global user_name
@@ -441,7 +508,7 @@ def check_alarm():
             sound.play(-1)
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
-            complete_face_detection = perform_facial_recognition(wake_up_duration, (max_wake_up_seconds + 20))
+            complete_face_detection = perform_facial_recognition(wake_up_duration, (int(max_facial_recog_duration) + 10))
             mixer.stop()
             alarm_report = "Successfully Completed user's facial recognition."
 
@@ -458,7 +525,8 @@ def check_alarm():
             wake_up_duration = None
             user_name = None
             alarm_day = None
-
+            delete_files(encoding_dir_file_path)
+            
             is_alarm_on = False
 
 
