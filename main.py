@@ -1,6 +1,6 @@
 import json
 import time
-import glob
+import shutil
 import paho.mqtt.client as mqtt
 import re
 import os
@@ -60,7 +60,8 @@ alarm_sound_file_path = os.getenv('ALARM_SOUND_FILE_PATH')
 sound = mixer.Sound(alarm_sound_file_path)
 encoding_data_file_path = os.getenv('ENCODING_DATA_FILE_PATH')
 image_data_file_path = os.getenv('IMAGE_DATA_FILE_PATH')
-max_wake_up_seconds = 15
+encoding_dir_file_path = os.getenv('ENCODING_DIR_FILE_PATH')
+max_facial_recog_duration = 15
 
 tts_file_path = os.getenv('TTS_FILE_PATH')
 
@@ -370,9 +371,12 @@ def delete_user(input_username):
 
 
 def delete_files(file_path):
-    files = glob.glob(file_path + '/.*')
-    for f in files:
-        os.remove(f)
+    for files in os.listdir(file_path):
+        path = os.path.join(file_path, files)
+        try:
+            shutil.rmtree(path)
+        except OSError:
+            os.remove(path)
     
     
 def register_user(mqttclient, input_username):
@@ -398,7 +402,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
     h, m, is_time_valid = extract_hour_and_minute(input_time)
     w = parsed_input[2].strip()
 
-    if is_time_valid and w.isnumeric() and int(w) <= max_wake_up_seconds:
+    if is_time_valid and w.isnumeric() and int(w) <= max_facial_recog_duration:
         alarm_h = h
         alarm_m = m
         alarm_day = get_date()
@@ -413,7 +417,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
         mqttclient.publish(output_topic, payload="Invalid input, please reenter request", qos=0, retain=False)
 
     else:
-        response = f"Invalid wakeup time, range is 0 to {max_wake_up_seconds}"
+        response = f"Invalid wakeup time, range is 0 to {max_facial_recog_duration}"
         mqttclient.publish(output_topic, payload=response, qos=0, retain=False)
 
 
@@ -489,7 +493,7 @@ def on_message(mqttclient, userdata, msg):
 def check_alarm():
     global is_alarm_on
     global wake_up_duration
-    global max_wake_up_seconds
+    global max_facial_recog_duration
     global alarm_m
     global alarm_h
     global user_name
@@ -504,7 +508,7 @@ def check_alarm():
             sound.play(-1)
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
-            complete_face_detection = perform_facial_recognition(wake_up_duration, (int(max_wake_up_seconds) + 10))
+            complete_face_detection = perform_facial_recognition(wake_up_duration, (int(max_facial_recog_duration) + 10))
             mixer.stop()
             alarm_report = "Successfully Completed user's facial recognition."
 
@@ -521,7 +525,7 @@ def check_alarm():
             wake_up_duration = None
             user_name = None
             alarm_day = None
-            delete_files(encoding_data_file_path)
+            delete_files(encoding_dir_file_path)
             
             is_alarm_on = False
 
