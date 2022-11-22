@@ -222,7 +222,8 @@ def get_waking_data_specific_date(uname, in_date, cols: set):
                                       to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
 
 
-def get_waking_data_date_range(uname, query_date, cols: set, to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
+def get_waking_data_date_range(uname, query_date, cols: set,
+                               to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
     if len(cols) > 0:
         q_cols = list(cols)
     else:
@@ -506,15 +507,16 @@ def on_message(mqttclient, userdata, msg):
             if not is_user_registered(username):
                 query_output = "Invalid Username"
             else:
-                query_cols = re.split('[(;)]', split_input[1].strip())
                 cols = set()
+                if len(split_input) > 2:
+                    query_cols = re.split('[(;)]', split_input[1].strip())
 
-                for col in query_cols:
-                    col = col.strip()
-                    if not col == 'username' and col in wake_up_dur_reg_cols:
-                        cols.add(col)
+                    for col in query_cols:
+                        col = col.strip()
+                        if not col == 'username' and col in wake_up_dur_reg_cols:
+                            cols.add(col)
 
-                if len(query_cols) > 0 and len(cols) == 0:
+                if len(split_input) > 2 and len(cols) == 0:
                     query_output = "Invalid parameters"
                 else:
                     param = split_input[len(split_input) - 1].strip()
