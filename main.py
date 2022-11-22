@@ -175,16 +175,15 @@ def is_user_registered(input_username):
     return result > 0
 
 
-def build_data_dict(data_collection, columns_collection, key_index=0):
+def build_data_dict(data_collection, columns_collection):
     result = {}
 
     for row in data_collection:
-        key = row[key_index]
+        key = row[0]
         nested_result = {}
-        i = 0
+        i = 1
         for col in columns_collection:
-            if not i == key_index:
-                nested_result[str(col)] = row[i]
+            nested_result[str(col)] = row[i]
             i = i + 1
 
         result[key] = nested_result
@@ -222,16 +221,21 @@ def get_waking_data_specific_date(uname, in_date, cols: set):
                                       to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
 
 
+def append_set(old_list: list, set_to_append: set):
+    for val in set_to_append:
+        old_list.append(val)
+
+    return old_list
+
+
 def get_waking_data_date_range(uname, query_date, cols: set,
                                to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
+    # Declaration is necessary for adhering to the contract of 'build_data_dict'.
+    q_cols = ['alarm_date']
     if len(cols) > 0:
-        q_cols = list(cols)
+        append_set(q_cols, cols)
     else:
-        q_cols = list(wake_up_dur_reg_cols)
-
-    # circuitous add and remove maneuver is necessary for knowing the index of 'alarm_date',
-    # which 'build_data_dict' needs.
-    q_cols.append('alarm_date')
+        append_set(q_cols, get_wake_up_dur_reg_cols())
 
     columns = ', '.join(q_cols)
     q = "SELECT {} FROM wake_up_durations WHERE username = %s and alarm_date >= %s and alarm_date < %s".format(columns)
@@ -241,7 +245,7 @@ def get_waking_data_date_range(uname, query_date, cols: set,
     rows = cursor.fetchall()
     db_conn.commit()
     cursor.close()
-    return build_data_dict(rows, q_cols, key_index=(len(q_cols) - 1))
+    return build_data_dict(rows, q_cols)
 
 
 def convert_to_binary_data(filename):
