@@ -71,6 +71,8 @@ wake_up_duration_table_cols = None
 wake_up_dur_reg_cols = None
 t_and_h_table_name = os.getenv('T_AND_H_TABLE_NAME')
 
+user_tables = [facial_data_table_name, t_and_h_table_name]
+
 
 # Format: 10/21/2022 12:00 AM
 def get_formatted_timestamp(input_datetime):
@@ -389,8 +391,11 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
 
 def delete_user(input_username):
     cursor = db_conn.cursor()
-    cursor.execute("DELETE FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
-    db_conn.commit()
+
+    for table in user_tables:
+        cursor.execute("DELETE FROM {} WHERE username = %s".format(table), (input_username,))
+        db_conn.commit()
+
     cursor.close()
 
 
