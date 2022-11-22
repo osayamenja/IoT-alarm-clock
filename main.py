@@ -240,7 +240,7 @@ def get_waking_data_date_range(uname, query_date, cols: set, to_date=get_date(ge
     rows = cursor.fetchall()
     db_conn.commit()
     cursor.close()
-    return build_data_dict(rows, cols, key_index=(len(q_cols) - 1))
+    return build_data_dict(rows, q_cols, key_index=(len(q_cols) - 1))
 
 
 def convert_to_binary_data(filename):
