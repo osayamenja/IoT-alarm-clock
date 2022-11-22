@@ -214,13 +214,13 @@ def get_temp_and_h_date_range(date_for_query, to_date=get_date(get_shifted_date_
     return build_data_dict(temp_and_h, ['Temp (*F)', "Humidity (%)"])
 
 
-def get_waking_data_specific_date(in_date, cols: set):
+def get_waking_data_specific_date(uname, in_date, cols: set):
     in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
-    return get_waking_data_date_range(in_date, cols,
+    return get_waking_data_date_range(uname, in_date, cols,
                                       to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
 
 
-def get_waking_data_date_range(query_date, cols: set, to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
+def get_waking_data_date_range(uname, query_date, cols: set, to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
     if len(cols) > 0:
         q_cols = list(cols)
     else:
@@ -231,9 +231,9 @@ def get_waking_data_date_range(query_date, cols: set, to_date=get_date(get_shift
     q_cols.append('alarm_date')
 
     columns = ', '.join(q_cols)
-    q = "SELECT {} FROM wake_up_durations WHERE alarm_date >= %s and alarm_date < %s".format(columns)
+    q = "SELECT {} FROM wake_up_durations WHERE username = %s and alarm_date >= %s and alarm_date < %s".format(columns)
     cursor = db_conn.cursor()
-    cursor.execute(q, (query_date, to_date))
+    cursor.execute(q, (uname, query_date, to_date))
 
     rows = cursor.fetchall()
     db_conn.commit()
@@ -515,9 +515,9 @@ def on_message(mqttclient, userdata, msg):
 
                     if param.isnumeric():
                         input_date = get_date(get_shifted_date_time(delta=int(param)))
-                        query_output = get_waking_data_date_range(input_date, cols)
+                        query_output = get_waking_data_date_range(username, input_date, cols)
                     else:
-                        query_output = get_waking_data_specific_date(param, cols)
+                        query_output = get_waking_data_specific_date(username, param, cols)
 
             retrieved_data = json.dumps(query_output, indent=2)
 
