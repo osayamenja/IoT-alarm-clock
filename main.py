@@ -71,7 +71,7 @@ wake_up_duration_table_cols = None
 wake_up_dur_reg_cols = None
 t_and_h_table_name = os.getenv('T_AND_H_TABLE_NAME')
 
-user_tables = [facial_data_table_name, t_and_h_table_name]
+user_tables = [facial_data_table_name, wake_up_duration_table_name]
 
 
 # Format: 10/21/2022 12:00 AM
@@ -300,8 +300,8 @@ def capture_and_persist_images_to_disk():
         img_name = image_data_file_path + "image_{}.jpg".format(img_counter)
         cv2.imwrite(img_name, image)
         print("{} written!".format(img_name))
-        img_counter += 1
         time.sleep(0.5)
+        img_counter += 1
         if img_counter == 40:
             break
 
