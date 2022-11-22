@@ -498,7 +498,7 @@ def on_message(mqttclient, userdata, msg):
             mqttclient.publish(output_topic, payload="Invalid username", qos=0, retain=False)
     elif msg.topic == retrieve_data_topic:
         retrieved_data = "Invalid Query"
-        if re.match('^[a-zA-Z0-9]*,(\\s*\\([a-z_A-Z,\\s]*\\),)?\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
+        if re.match('^[a-zA-Z0-9]*,(\\s*\\([a-z_A-Z;\\s]*\\),)?\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
             split_input = mqtt_payload.split(',')
             username = split_input[0].strip()
             global wake_up_dur_reg_cols
@@ -506,7 +506,7 @@ def on_message(mqttclient, userdata, msg):
             if not is_user_registered(username):
                 query_output = "Invalid Username"
             else:
-                query_cols = re.split('[(,)]', split_input[1].strip())
+                query_cols = re.split('[(;)]', split_input[1].strip())
                 cols = set()
 
                 for col in query_cols:
