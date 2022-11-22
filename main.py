@@ -516,8 +516,9 @@ def on_message(mqttclient, userdata, msg):
                 if len(query_cols) > 0 and len(cols) == 0:
                     query_output = "Invalid parameters"
                 else:
-                    param = split_input[2].strip()
+                    param = split_input[len(split_input) - 1].strip()
 
+                    print(param)
                     if param.isnumeric():
                         input_date = get_date(get_shifted_date_time(delta=int(param)))
                         query_output = get_waking_data_date_range(username, input_date, cols)
