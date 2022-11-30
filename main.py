@@ -61,18 +61,17 @@ sound = mixer.Sound(alarm_sound_file_path)
 encoding_data_file_path = os.getenv('ENCODING_DATA_FILE_PATH')
 image_data_file_path = os.getenv('IMAGE_DATA_FILE_PATH')
 encoding_dir_file_path = os.getenv('ENCODING_DIR_FILE_PATH')
-max_facial_recog_duration = 15
+max_facial_recognition_duration = 15
 
 tts_file_path = os.getenv('TTS_FILE_PATH')
 
 facial_data_table_name = os.getenv('FACIAL_DATA_TABLE_NAME')
 wake_up_duration_table_name = os.getenv('WAKE_DURATION_TABLE_NAME')
+wake_up_duration_table_cols = None
+wake_up_dur_reg_cols = None
 t_and_h_table_name = os.getenv('T_AND_H_TABLE_NAME')
 
-# The below strings are sample JSON outputs for user queries.
-# They may be hard to read inline, so use a JSON editor or view the output of the 'retrieved_data' variable.
-time_query_output = {"10/4/2022 12:30": "80 secs", "10/4/2022 11:30": "50 secs"}
-t_and_h_query_output = {"10/4/2022 12:30": {"Temp": "30 *F", "Humidity": "50%"}}
+user_tables = [facial_data_table_name, wake_up_duration_table_name]
 
 
 # Format: 10/21/2022 12:00 AM
@@ -180,15 +179,14 @@ def build_data_dict(data_collection, columns_collection):
     result = {}
 
     for row in data_collection:
-        i = 0
-        recorded_on = row[i]
+        key = row[0]
         nested_result = {}
-
+        i = 1
         for col in columns_collection:
-            i = i + 1
             nested_result[str(col)] = row[i]
+            i = i + 1
 
-        result[recorded_on] = nested_result
+        result[key] = nested_result
 
     return result
 
@@ -215,6 +213,39 @@ def get_temp_and_h_date_range(date_for_query, to_date=get_date(get_shifted_date_
     db_conn.commit()
     cursor.close()
     return build_data_dict(temp_and_h, ['Temp (*F)', "Humidity (%)"])
+
+
+def get_waking_data_specific_date(uname, in_date, cols: set):
+    in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
+    return get_waking_data_date_range(uname, in_date, cols,
+                                      to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
+
+
+def append_set(old_list: list, set_to_append: set):
+    for val in set_to_append:
+        old_list.append(val)
+
+    return old_list
+
+
+def get_waking_data_date_range(uname, query_date, cols: set,
+                               to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
+    # Declaration is necessary for adhering to the contract of 'build_data_dict'.
+    q_cols = ['alarm_date']
+    if len(cols) > 0:
+        append_set(q_cols, cols)
+    else:
+        append_set(q_cols, get_wake_up_dur_reg_cols())
+
+    columns = ', '.join(q_cols)
+    q = "SELECT {} FROM wake_up_durations WHERE username = %s and alarm_date >= %s and alarm_date < %s".format(columns)
+    cursor = db_conn.cursor()
+    cursor.execute(q, (uname, query_date, to_date))
+
+    rows = cursor.fetchall()
+    db_conn.commit()
+    cursor.close()
+    return build_data_dict(rows, q_cols)
 
 
 def convert_to_binary_data(filename):
@@ -273,8 +304,8 @@ def capture_and_persist_images_to_disk():
         img_name = image_data_file_path + "image_{}.jpg".format(img_counter)
         cv2.imwrite(img_name, image)
         print("{} written!".format(img_name))
-        img_counter += 1
         time.sleep(0.5)
+        img_counter += 1
         if img_counter == 40:
             break
 
@@ -365,8 +396,11 @@ def perform_facial_recognition(user_wake_up_time, alarm_timeout):
 
 def delete_user(input_username):
     cursor = db_conn.cursor()
-    cursor.execute("DELETE FROM {} WHERE username = %s".format(facial_data_table_name), (input_username,))
-    db_conn.commit()
+
+    for table in user_tables:
+        cursor.execute("DELETE FROM {} WHERE username = %s".format(table), (input_username,))
+        db_conn.commit()
+
     cursor.close()
 
 
@@ -377,8 +411,8 @@ def delete_files(file_path):
             shutil.rmtree(path)
         except OSError:
             os.remove(path)
-    
-    
+
+
 def register_user(mqttclient, input_username):
     mqttclient.publish(output_topic, payload="Starting registration...", qos=0, retain=False)
     capture_and_persist_images_to_disk()
@@ -402,7 +436,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
     h, m, is_time_valid = extract_hour_and_minute(input_time)
     w = parsed_input[2].strip()
 
-    if is_time_valid and w.isnumeric() and int(w) <= max_facial_recog_duration:
+    if is_time_valid and w.isnumeric() and int(w) <= max_facial_recognition_duration:
         alarm_h = h
         alarm_m = m
         alarm_day = get_date()
@@ -417,7 +451,7 @@ def configure_alarm(mqttclient, parsed_input, input_username):
         mqttclient.publish(output_topic, payload="Invalid input, please reenter request", qos=0, retain=False)
 
     else:
-        response = f"Invalid wakeup time, range is 0 to {max_facial_recog_duration}"
+        response = f"Invalid wakeup time, range is 0 to {max_facial_recognition_duration}"
         mqttclient.publish(output_topic, payload=response, qos=0, retain=False)
 
 
@@ -469,21 +503,44 @@ def on_message(mqttclient, userdata, msg):
             mqttclient.publish(output_topic, payload="Invalid username", qos=0, retain=False)
     elif msg.topic == retrieve_data_topic:
         retrieved_data = "Invalid Query"
-        if re.match('^[a-zA-Z0-9]*,\\s*wake_duration,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
-            retrieved_data = json.dumps(time_query_output, indent=2)
+        if re.match('^[a-zA-Z0-9]*,(\\s*\\([a-z_A-Z;\\s]*\\),)?\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
+            split_input = mqtt_payload.split(',')
+            username = split_input[0].strip()
+            global wake_up_dur_reg_cols
+
+            if not is_user_registered(username):
+                query_output = "Invalid Username"
+            else:
+                cols = set()
+                if len(split_input) > 2:
+                    query_cols = re.split('[(;)]', split_input[1].strip())
+
+                    for col in query_cols:
+                        col = col.strip()
+                        if not col == 'username' and col in wake_up_dur_reg_cols:
+                            cols.add(col)
+
+                if len(split_input) > 2 and len(cols) == 0:
+                    query_output = "Invalid parameters"
+                else:
+                    param = split_input[len(split_input) - 1].strip()
+                    if param.isnumeric():
+                        input_date = get_date(get_shifted_date_time(delta=int(param)))
+                        query_output = get_waking_data_date_range(username, input_date, cols)
+                    else:
+                        query_output = get_waking_data_specific_date(username, param, cols)
+
+            retrieved_data = json.dumps(query_output, indent=2)
 
         elif re.match('^t&h,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
             query_param = mqtt_payload.split(',')[1].strip()
-            query_output = ""
 
             # X days ago
             if query_param.isnumeric():
                 input_date = get_date(get_shifted_date_time(delta=int(query_param)))
                 query_output = get_temp_and_h_date_range(input_date)
             else:  # specific date
-                t = datetime.datetime.strptime(query_param, "%m/%d/%Y")
-                d = get_date(get_shifted_date_time(t, delta=1, subtract=False))
-                query_output = get_temp_and_h_date_range(query_param, to_date=d)
+                query_output = get_temp_and_h_specific_date(query_param)
 
             retrieved_data = json.dumps(query_output, indent=2)
 
@@ -493,7 +550,7 @@ def on_message(mqttclient, userdata, msg):
 def check_alarm():
     global is_alarm_on
     global wake_up_duration
-    global max_facial_recog_duration
+    global max_facial_recognition_duration
     global alarm_m
     global alarm_h
     global user_name
@@ -508,7 +565,8 @@ def check_alarm():
             sound.play(-1)
             client.publish(output_topic, payload="ALARM ON!", qos=0, retain=False)
             time.sleep(5)
-            complete_face_detection = perform_facial_recognition(wake_up_duration, (int(max_facial_recog_duration) + 10))
+            complete_face_detection = perform_facial_recognition(wake_up_duration,
+                                                                 (int(max_facial_recognition_duration) + 10))
             mixer.stop()
             alarm_report = "Successfully Completed user's facial recognition."
 
@@ -526,7 +584,7 @@ def check_alarm():
             user_name = None
             alarm_day = None
             delete_files(encoding_dir_file_path)
-            
+
             is_alarm_on = False
 
 
@@ -545,6 +603,28 @@ def init_database():
         return conn
 
 
+def get_table_columns(table_name):
+    s = set()
+    cursor = db_conn.cursor()
+    q = "SELECT * FROM {} LIMIT 1".format(table_name)
+    cursor.execute(q)
+    rows = cursor.fetchall()
+    rows_description = cursor.description
+    for row in rows_description:
+        s.add(row[0])
+    db_conn.commit()
+    cursor.close()
+    s.remove('id')
+    return s
+
+
+def get_wake_up_dur_reg_cols():
+    s = get_table_columns(wake_up_duration_table_name)
+    s.remove('username')
+    s.remove('alarm_date')
+    return s
+
+
 def init_sensor():
     for proc in psutil.process_iter():
         if proc.name() == 'libgpiod_pulsein' or proc.name() == 'libgpiod_pulsei':
@@ -560,6 +640,7 @@ if __name__ == "__main__":
 
     # establish db connection
     db_conn = init_database()
+    wake_up_dur_reg_cols = get_wake_up_dur_reg_cols()
 
     broker_address = os.getenv('BROKER_ADDRESS')
     broker_port_number = int(os.getenv('BROKER_PORT_NUMBER'))
