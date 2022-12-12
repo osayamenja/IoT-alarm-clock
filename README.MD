@@ -4,6 +4,11 @@
 ## Overview
 A smart alarm clock supporting configurable timed facial recognition, ambient climate sensing and data querying.
 
+## Specifications
+- Facial Recognition: **OpenCV**
+- Database: **Azure MySQL**
+- Message Queue: **EMQ MQTT**
+
 ## Requirements
 ### Hardware
 - Raspberry Pi (guaranteed to work on a 4)
