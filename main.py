@@ -192,8 +192,12 @@ def build_data_dict(data_collection, columns_collection):
 
 
 def get_temp_and_h_specific_date(in_date):
-    in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
-    return get_temp_and_h_date_range(in_date, to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
+    try:
+        in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
+    except:
+        return None
+    else:
+        return get_temp_and_h_date_range(in_date, to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
 
 
 def get_shifted_date_time(from_date_time: datetime.datetime = datetime.datetime.now(), delta=0, subtract=True):
@@ -215,27 +219,32 @@ def get_temp_and_h_date_range(date_for_query, to_date=get_date(get_shifted_date_
     return build_data_dict(temp_and_h, ['Temp (*F)', "Humidity (%)"])
 
 
-def get_waking_data_specific_date(uname, in_date, cols: set):
-    in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
-    return get_waking_data_date_range(uname, in_date, cols,
+def get_waking_data_specific_date(uname, in_date, cols):
+    try:
+        in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
+    except:
+        return None
+    else:
+        return get_waking_data_date_range(uname, in_date, cols,
                                       to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
 
 
-def append_set(old_list: list, set_to_append: set):
-    for val in set_to_append:
+def append_collection(old_list: list, collection_to_append):
+    for val in collection_to_append:
         old_list.append(val)
 
     return old_list
 
 
-def get_waking_data_date_range(uname, query_date, cols: set,
+def get_waking_data_date_range(uname, query_date, cols,
                                to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
     # Declaration is necessary for adhering to the contract of 'build_data_dict'.
     q_cols = ['alarm_date']
-    if len(cols) > 0:
-        append_set(q_cols, cols)
-    else:
-        append_set(q_cols, get_wake_up_dur_reg_cols())
+    
+    if len(cols) == 0:
+        cols = get_wake_up_dur_reg_cols()
+        
+    append_collection(q_cols, cols)
 
     columns = ', '.join(q_cols)
     q = "SELECT {} FROM wake_up_durations WHERE username = %s and alarm_date >= %s and alarm_date < %s".format(columns)
@@ -245,7 +254,7 @@ def get_waking_data_date_range(uname, query_date, cols: set,
     rows = cursor.fetchall()
     db_conn.commit()
     cursor.close()
-    return build_data_dict(rows, q_cols)
+    return build_data_dict(rows, cols)
 
 
 def convert_to_binary_data(filename):
@@ -460,7 +469,6 @@ def set_alarm(mqttclient, user_input):
     username = parsed_input[0].strip()
     if is_user_registered(username):
         mqttclient.publish(output_topic, payload="Username Verified!", qos=0, retain=False)
-        mqttclient.publish(output_topic, payload="Setting Alarm...", qos=0, retain=False)
         write_encodings_file_from_db_to_disk(username)
         configure_alarm(mqttclient, parsed_input, username)
     else:
@@ -521,7 +529,7 @@ def on_message(mqttclient, userdata, msg):
                             cols.add(col)
 
                 if len(split_input) > 2 and len(cols) == 0:
-                    query_output = "Invalid parameters"
+                    retrieved_data = "Invalid parameters"
                 else:
                     param = split_input[len(split_input) - 1].strip()
                     if param.isnumeric():
@@ -529,8 +537,11 @@ def on_message(mqttclient, userdata, msg):
                         query_output = get_waking_data_date_range(username, input_date, cols)
                     else:
                         query_output = get_waking_data_specific_date(username, param, cols)
-
-            retrieved_data = json.dumps(query_output, indent=2)
+            
+                    if query_output == None:
+                        retrieved_data = "Invalid parameters"
+                    else:
+                        retrieved_data = json.dumps(query_output, indent=2)
 
         elif re.match('^t&h,\\s*(\\d+|\\d{2}/\\d{2}/\\d{4})', mqtt_payload):
             query_param = mqtt_payload.split(',')[1].strip()
@@ -542,7 +553,10 @@ def on_message(mqttclient, userdata, msg):
             else:  # specific date
                 query_output = get_temp_and_h_specific_date(query_param)
 
-            retrieved_data = json.dumps(query_output, indent=2)
+            if query_output == None:
+                retrieved_data = "Invalid parameters"
+            else:
+                retrieved_data = json.dumps(query_output, indent=2)
 
         mqttclient.publish(output_topic, payload=retrieved_data, qos=0, retain=False)
 
@@ -569,10 +583,13 @@ def check_alarm():
                                                                  (int(max_facial_recognition_duration) + 10))
             mixer.stop()
             alarm_report = "Successfully Completed user's facial recognition."
+            facial_recog_signal = "Facial recognition succeeded!"
 
             if not complete_face_detection:
                 alarm_report = "Unsuccessful in recognizing the user's face before alarm timeout."
+                facial_recog_signal = "Unsuccessful in recognition before timeout :("
 
+            client.publish(output_topic, payload=facial_recog_signal, qos=0, retain=False)
             speak_text(alarm_report)
             alarm_time = str(alarm_h) + ":" + str(alarm_m)
             insert_wake_up_time(user_name, wake_up_duration, complete_face_detection, alarm_time)
