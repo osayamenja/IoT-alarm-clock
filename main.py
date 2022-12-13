@@ -194,10 +194,11 @@ def build_data_dict(data_collection, columns_collection):
 def get_temp_and_h_specific_date(in_date):
     try:
         in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
-    except:
+    except RuntimeError:
         return None
     else:
-        return get_temp_and_h_date_range(in_date, to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
+        return get_temp_and_h_date_range(in_date,
+                                         to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
 
 
 def get_shifted_date_time(from_date_time: datetime.datetime = datetime.datetime.now(), delta=0, subtract=True):
@@ -222,11 +223,11 @@ def get_temp_and_h_date_range(date_for_query, to_date=get_date(get_shifted_date_
 def get_waking_data_specific_date(uname, in_date, cols):
     try:
         in_dt = datetime.datetime.strptime(in_date, "%m/%d/%Y")
-    except:
+    except RuntimeError:
         return None
     else:
         return get_waking_data_date_range(uname, in_date, cols,
-                                      to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
+                                          to_date=get_date(get_shifted_date_time(in_dt, delta=1, subtract=False)))
 
 
 def append_collection(old_list: list, collection_to_append):
@@ -240,10 +241,10 @@ def get_waking_data_date_range(uname, query_date, cols,
                                to_date=get_date(get_shifted_date_time(delta=1, subtract=False))):
     # Declaration is necessary for adhering to the contract of 'build_data_dict'.
     q_cols = ['alarm_date']
-    
+
     if len(cols) == 0:
         cols = get_wake_up_dur_reg_cols()
-        
+
     append_collection(q_cols, cols)
 
     columns = ', '.join(q_cols)
@@ -517,7 +518,7 @@ def on_message(mqttclient, userdata, msg):
             global wake_up_dur_reg_cols
 
             if not is_user_registered(username):
-                query_output = "Invalid Username"
+                retrieved_data = "Invalid Username"
             else:
                 cols = set()
                 if len(split_input) > 2:
@@ -537,8 +538,8 @@ def on_message(mqttclient, userdata, msg):
                         query_output = get_waking_data_date_range(username, input_date, cols)
                     else:
                         query_output = get_waking_data_specific_date(username, param, cols)
-            
-                    if query_output == None:
+
+                    if query_output is None:
                         retrieved_data = "Invalid parameters"
                     else:
                         retrieved_data = json.dumps(query_output, indent=2)
@@ -553,7 +554,7 @@ def on_message(mqttclient, userdata, msg):
             else:  # specific date
                 query_output = get_temp_and_h_specific_date(query_param)
 
-            if query_output == None:
+            if query_output is None:
                 retrieved_data = "Invalid parameters"
             else:
                 retrieved_data = json.dumps(query_output, indent=2)
