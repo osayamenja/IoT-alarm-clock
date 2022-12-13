@@ -4,6 +4,40 @@
 ## Overview
 A smart alarm clock supporting configurable timed facial recognition, ambient climate sensing and data querying.
 
+## Architecture
+The architecture of Sparky uses multithreading for concurrent execution of MQTT requests, 
+alarm time checking and ambient climate data upload.
+
+![Architecture](arch_images/Sparky_Arch.png)
+
+## Register/Delete User
+Sparky captures multiple facial images and trains a local OpenCV model with those images.
+The resultant encodings file is stored in the database.
+
+![Register/Delete User](arch_images/Reg_Del_User.png)
+
+Deleting a user is a simple database call. See [register_user](#registerdelete-user-1) 
+and [delete_user](#registerdelete-user-1) for its request schema.
+
+## Set Alarm
+Setting an alarm entails: 
+- Verifying the user.
+- Retrieving their facial encodings from the database. 
+- Persisting the returned file locally.
+- Updating local state to configure the alarm time.
+
+![Set_Alarm](arch_images/Set_alarm.png)
+
+See [set alarm](#set-alarm-1) for its request schema.
+
+## Ring Alarm
+
+![Ring_Alarm](arch_images/Ring_Alarm.png)
+
+## Query Data
+
+![Retrieve_Data](arch_images/Retrieve_Data.png)
+
 ## Specifications
 - Facial Recognition: **OpenCV**
 - Database: **Azure MySQL**
@@ -34,19 +68,12 @@ See [here](https://www.emqx.com/en/blog/use-mqtt-with-raspberry-pi#:~:text=insta
 
 ## Requests Schema
 
-### Register User
+### Register/Delete User
 ```
     username   
 ```
 
 - `username` is an alphanumeric string.
-
-### Delete User
-```
-    username   
-```
-
-- `username` is a registered username.
 
 ### Set Alarm
 ```
