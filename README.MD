@@ -1,4 +1,4 @@
-# Smart IoT Alarm Clock
+# SParky
 
 
 ## Overview
