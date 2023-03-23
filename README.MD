@@ -3,6 +3,7 @@
 
 ## Overview
 A smart alarm clock supporting configurable timed facial recognition, ambient climate sensing and data querying.
+Skip to [Run](#run) to see how to run the application.
 
 ## Architecture
 The architecture of Sparky uses multithreading for concurrent execution of MQTT requests, 
@@ -60,6 +61,7 @@ See [here](https://www.emqx.com/en/blog/use-mqtt-with-raspberry-pi#:~:text=insta
 
 ## Run
 - Install all external dependencies on the import listing.
+- If you do not have DHT11 connected, then comment out `t_and_h_upload_worker.start()` in the main function.
 - Execute the `main.py` file
 - Verify database connection was successful through stdout output: `Connection established Successfully!`
 - Go to MQTT X Web and set up a connection to your broker or the free broker.
