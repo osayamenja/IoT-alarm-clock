@@ -1,0 +1,20 @@
+DB_USER=
+PASSWORD=
+HOST=
+PORT=
+SSL_CA=
+DATABASE=
+BROKER_ADDRESS=
+BROKER_PORT_NUMBER=
+BROKER_KEEP_ALIVE_TIME=
+ENCODING_DATA_FILE_PATH=./facial-encoding/encodings.pickle
+ENCODING_DIR_FILE_PATH=./facial-encoding
+IMAGE_DATA_FILE_PATH=./images
+FACIAL_DATA_TABLE_NAME=facial_data
+WAKE_DURATION_TABLE_NAME=wake_up_durations
+TTS_FILE_PATH=speech.mp3
+T_AND_H_TABLE_NAME=temp_and_humidity
+
+# Ideally, any sound file format supported by pygame/mixer should work.
+ALARM_SOUND_FILE_PATH=
+
