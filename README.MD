@@ -55,9 +55,18 @@ See [set alarm](#set-alarm-1) for its request schema.
 ### Software
 - Access to [MQTT X Web](https://mqttx.app/web)
 
-### Configuration files
-By design, connecting to a MySQL database or MQTT broker requires a configured `.env` file. EMQ provides a free broker. 
-See [here](https://www.emqx.com/en/blog/use-mqtt-with-raspberry-pi#:~:text=install%20paho%2Dmqtt-,The%20use%20of%20MQTT,-Connect%20to%20the) for more details.
+### Environment Variable file
+By design, connecting to a MySQL database or MQTT broker requires a configured `.env` file. 
+To that end, please follow the steps below:
+- Populate the fields without values in `template.txt`.
+- Rename from `template.txt` to `.env`.
+
+NB: EMQ provides a free broker. See [here](https://www.emqx.com/en/blog/use-mqtt-with-raspberry-pi#:~:text=install%20paho%2Dmqtt-,The%20use%20of%20MQTT,-Connect%20to%20the) for more details.
+
+### SQL Tables
+![schema](arch_images/data_model.png)
+
+The SQL code for generating the data model above is available in [tables.sql](tables.sql).
 
 ## Run
 - Install all external dependencies on the import listing.
